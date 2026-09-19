@@ -24,6 +24,7 @@ iOS版のカスタムキーボードとは異なり、macOSの入力メソッド
 - 通常の英字入力を妨げない、モードレスな操作感を維持する。
 - 変換処理、プロバイダー連携、設定保存などは、可能な範囲でSumibi-iOSの設計と実装を参照する。
 - macOS固有の入力処理とUIは、macOSの標準的な操作や外観に合わせて設計する。
+- macOS 27以降でAppleのPrivate Cloud Compute（PCC）を利用できる場合は、PCCを優先する。利用できない環境では利用者自身のAPIキー（BYOK: Bring Your Own Key）を使う。
 - 仕様が未確定の機能は、合意を得てから実装する。
 
 ## 3. 入力と変換
@@ -60,19 +61,33 @@ iOS版のカスタムキーボードとは異なり、macOSの入力メソッド
 
 ### 4.2 設定画面
 
-- APIエンドポイント、モデル名、APIキーを設定できるようにする。
+- BYOK用のAPIエンドポイント、モデル名、APIキーを設定できるようにする。
+- macOS 27以降でPCCが利用可能な場合、BYOK設定は必須にしない。
+- macOS 27未満、またはPCCを利用できない環境では、変換のためにBYOK設定を必須とする。
+- PCCからBYOKへの自動切替が起こり得ること、切替先のプロバイダー、料金が発生し得ることを設定時に明示する。
 - ユーザー辞書など、Sumibi-iOSと共通する設定の採用範囲は要検討とする。
 - 設定画面の提供方法は要検討とする。
 
 ### 4.3 変換処理
 
-- OpenAI互換APIを利用する。
-- リクエスト形式、プロンプト、レスポンス解析、エラー分類は、可能な範囲でSumibi-iOSの`SumibiCore`を参照する。
+- 変換バックエンドとして、AppleのPCCと、利用者のAPIキーを使うOpenAI互換API（BYOK）の2系統を用意する。
+- macOS 27以降では、PCCの利用条件を満たし、現在利用可能で、利用上限にも達していない場合にPCCを優先する。PCCのために利用者へAPIキーの入力を求めない。
+- macOS 27未満ではPCCを使わず、BYOKを必須とする。
+- macOS 27以降でもPCCが利用できない場合は、設定済みのBYOKを使う。BYOKが未設定なら、変換できない理由と設定方法を示し、原文を維持する。
+- PCCの利用上限に到達した場合は、BYOK設定時に自動切替へ同意した利用者の、設定済みBYOKへ変換を切り替える。上限到達を変換前に検出した場合と、PCCの応答で上限到達エラーを受けた場合の両方に対応する。
+- BYOKが未設定でPCCの上限に達した場合は、自動で別サービスへ送信せず、原文を維持して設定を案内する。
+- 1回の変換操作に対するBYOKへの再試行は最大1回とし、PCCの結果とBYOKの結果を重複して確定しない。
+- BYOK側のリクエスト形式、プロンプト、レスポンス解析、エラー分類は、可能な範囲でSumibi-iOSの`SumibiCore`を参照する。
 - macOS版とiOS版でコードを直接共有するか、実装を同期するかは要検討とする。
+
+PCCはmacOS 27というOSバージョンだけで利用できるわけではない。開発者アカウントへのPCC権限の付与、対応する配布方法、Apple Intelligence対応デバイス・地域・設定、日本語ロケールへの対応などを確認する。利用可否と利用枠は別に判定し、利用可でも上限到達済みならBYOKへ切り替える。
+
+Appleの現行資料では、PCCの本番利用は要件を満たす開発者のApp Store配布アプリとして案内されている。SumibiのmacOS入力メソッドをその形で配布できるか、権限を取得できるかは実装前に確認する。条件を満たせない場合は、macOS 27以降でもBYOKを利用する。PCCのAPIと提供条件は現時点でベータ版のため、正式版で再確認する。
 
 ## 5. プライバシーとセキュリティ
 
-- 外部APIへの送信は、利用者が`Control + J`で変換を実行したときだけ行う。
+- PCCまたはBYOKのプロバイダーへの送信は、利用者が`Control + J`で変換を実行したときだけ行う。
+- PCCとBYOKでは送信先と適用されるサービスの条件が異なるため、BYOKへの自動切替は事前に説明して同意を得る。利用者が設定したプロバイダー以外へは送信しない。
 - キー入力や変換対象をログへ保存しない。
 - APIキーを設定ファイルやログへ平文で保存しない。
 - APIキーはmacOSのKeychainへ保存する。
@@ -85,6 +100,7 @@ iOS版のカスタムキーボードとは異なり、macOSの入力メソッド
 - 変換に失敗しても、入力中の原文を失わない。
 - エラー表示は入力作業を大きく妨げない方法とする。具体的な表示方法は要検討とする。
 - 処理中に入力先、カーソル位置、または追跡文字列が変化した場合は、古い変換結果を適用しない。
+- PCCの利用上限到達と、PCCの一時的な通信障害・サービス障害を区別する。上限到達時は4.3節のBYOK切替に従う。
 
 ## 7. 現在の要検討事項
 
@@ -100,7 +116,16 @@ iOS版のカスタムキーボードとは異なり、macOSの入力メソッド
 10. 対応するmacOSの最小バージョン
 11. App Sandbox、署名、公証、配布方法
 12. Sumibi-iOSとの共有コードの管理方法
+13. PCCの一時的な通信障害・サービス障害時にもBYOKへ自動切替するか
+14. PCCとBYOKの利用状態・利用上限・切替結果を入力中にどう表示するか
+15. macOS入力メソッドのApp Store配布可否、PCC権限の取得条件と署名方法
 
 ## 8. スコープ外
 
 現時点では未確定とする。機能仕様の合意にあわせて定義する。
+
+## 9. 技術資料
+
+- [Apple: Adding server-side intelligence with Private Cloud Compute](https://developer.apple.com/documentation/foundationmodels/adding-server-side-intelligence-with-private-cloud-compute)
+- [Apple: PrivateCloudComputeLanguageModel](https://developer.apple.com/documentation/foundationmodels/privatecloudcomputelanguagemodel)
+- [Apple: Accessing Private Cloud Compute](https://developer.apple.com/private-cloud-compute/)

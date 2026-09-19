@@ -13,7 +13,8 @@
 | InputMethodKit | macOSの入力メソッド本体と、入力先アプリとの通信 |
 | AppKit | 候補ウィンドウ、状態表示、入力メニューなどIME固有のUI |
 | SwiftUI | API設定やユーザー辞書などの設定画面 |
-| URLSession | OpenAI互換APIとの非同期通信 |
+| Foundation Models | macOS 27以降で利用条件を満たす場合のApple Private Cloud Compute（PCC）への接続 |
+| URLSession | 利用者のAPIキーを使うOpenAI互換API（BYOK）との非同期通信 |
 | Keychain Services | APIキーの安全な保存 |
 | UserDefaults | APIエンドポイント、モデル名など機密ではない設定の保存 |
 
@@ -39,7 +40,7 @@ macOS
 Sumibi InputMethodKit
   ├─ 入力文字列を追跡
   ├─ Control + Jを判定
-  ├─ LLMへ変換を依頼
+  ├─ PCCまたはBYOKのLLMへ変換を依頼
   └─ 原文を変換結果で置換
       │
       ▼
@@ -55,6 +56,8 @@ Sumibi.app
 │  ├─ SumibiInputController
 │  └─ 候補ウィンドウ
 ├─ ConversionCore
+│  ├─ PCC利用可否・利用枠の判定とBYOKへの切替
+│  ├─ Foundation ModelsのPCCクライアント
 │  ├─ OpenAI互換APIクライアント
 │  ├─ プロンプト生成
 │  ├─ レスポンス解析
@@ -65,7 +68,7 @@ Sumibi.app
    └─ Keychain
 ```
 
-`ConversionCore`はプラットフォームに依存しない領域とし、可能な範囲でSumibi-iOSの`SumibiCore`を参照する。
+`ConversionCore`の変換要求・結果・エラーなど共通部分は、可能な範囲でSumibi-iOSの`SumibiCore`を参照する。PCCクライアントはmacOS 27以降のAPIに依存するため、プラットフォーム固有の実装として分離する。
 
 ## 4. InputMethodKitの役割
 
@@ -176,14 +179,18 @@ Control + J
     │
     ├─ 現在の追跡文字列をスナップショットとして保存
     ├─ 入力セッションと更新番号を記録
-    ├─ URLSessionでLLM APIを呼び出す
+    ├─ macOS 27以降でPCCが利用可能ならPCCを呼び出す
+    │    └─ 利用上限到達時は、設定済みBYOKへ最大1回切り替える
+    ├─ PCCを利用できない場合はBYOKのAPIを呼び出す
     │
     ├─ 応答時に入力状態が変わっていないか検証
     │
     └─ 問題がなければ日本語を確定
 ```
 
-通信はSwiftの非同期処理を使用し、入力メソッドのメインスレッドを停止させない。
+通信はSwiftの非同期処理を使用し、入力メソッドのメインスレッドを停止させない。macOS 27未満ではBYOKを必須とする。macOS 27以降でもPCCの権限・デバイス・地域・言語・利用状態を確認し、使えない場合はBYOKを必要とする。
+
+PCCの利用可否は`PrivateCloudComputeLanguageModel.availability`、利用上限は`quotaUsage`で確認する。利用可能状態と利用枠は別概念なので、変換処理中に`quotaLimitReached`エラーが返る場合も処理する。PCCの権限と配布条件が確認できるまで、PCC対応を製品として保証しない。
 
 応答を適用する前に、少なくとも次の状態を検証する。
 
@@ -222,9 +229,9 @@ InputMethodKitには`IMKCandidates`という標準候補ウィンドウがある
 
 設定項目の候補：
 
-- APIエンドポイント
-- モデル名
-- APIキー
+- BYOK用のAPIエンドポイント
+- BYOK用のモデル名とAPIキー
+- PCCの利用状態と、上限到達時のBYOK自動切替への同意
 - ユーザー辞書
 - 変換指示プリセット
 - プライバシー説明とデータ送信への同意
@@ -234,7 +241,7 @@ InputMethodKitには`IMKCandidates`という標準候補ウィンドウがある
 
 保存先の基本方針：
 
-- APIキー: macOS Keychain
+- BYOK用のAPIキー: macOS Keychain（PCCのみを使う場合は不要）
 - APIエンドポイント、モデル名、その他の一般設定: UserDefaults
 - 入力内容と変換対象: 永続保存しない
 
@@ -261,9 +268,10 @@ InputMethodKitを使用するアプリは、通常のmacOSアプリとは起動�
 5. Sumibi-iOSを参照してOpenAI互換APIクライアントを追加する
 6. 変換中の状態検証とキャンセルを追加する
 7. Keychainと設定画面を追加する
-8. 候補表示、Undo、ユーザー辞書を順番に追加する
-9. 複数アプリで互換性を検証する
-10. インストーラー、署名、公証、配布方法を整備する
+8. PCCの権限と配布条件を確認し、利用可能な環境でPCC接続を追加する
+9. PCCの利用上限を変換前・変換中の両方で検出し、BYOKへの切替を検証する
+10. 候補表示、Undo、ユーザー辞書を順番に追加する
+11. 複数アプリで互換性を検証する
+12. インストーラー、署名、公証、配布方法を整備する
 
 最初からすべての機能を実装せず、入力メソッドとしての安全な文字追跡と置換を先に検証する。
-
