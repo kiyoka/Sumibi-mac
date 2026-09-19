@@ -68,7 +68,7 @@ Sumibi.app
    └─ Keychain
 ```
 
-`ConversionCore`の変換要求・結果・エラーなど共通部分は、可能な範囲でSumibi-iOSの`SumibiCore`を参照する。PCCクライアントはmacOS 27以降のAPIに依存するため、プラットフォーム固有の実装として分離する。
+`ConversionCore`はmacOS版専用の変換処理として実装・保守する。iOS版の`SumibiCore`は設計・実装の参考にするが、コードや共通パッケージを両版で共有せず、実装同期も行わない。macOS版のソースコードと依存関係はSumibi-macリポジトリで独立して管理する。PCCクライアントはmacOS 27以降のAPIに依存するため、macOS版の内部でBYOKクライアントと分離する。
 
 ## 4. InputMethodKitの役割
 
