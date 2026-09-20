@@ -3,19 +3,19 @@
 <plist version="1.0"><dict>
   <key>CFBundleDevelopmentRegion</key><string>ja</string>
   <key>CFBundleExecutable</key><string>SumibiPrototypeIME</string>
-  <key>CFBundleIdentifier</key><string>dev.kiyoka.SumibiPrototypeIME</string>
+  <key>CFBundleIdentifier</key><string>dev.kiyoka.inputmethod.SumibiPrototypeProbe1</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleName</key><string>Sumibi Prototype</string>
   <key>CFBundleIconFile</key><string>PrototypeIcon.icns</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleSupportedPlatforms</key><array><string>MacOSX</string></array>
-  <key>CFBundleShortVersionString</key><string>0.3</string>
-  <key>CFBundleVersion</key><string>3</string>
+  <key>CFBundleShortVersionString</key><string>0.4</string>
+  <key>CFBundleVersion</key><string>4</string>
   <key>LSBackgroundOnly</key><true/>
   <key>LSUIElement</key><true/>
   <key>LSMinimumSystemVersion</key><string>26.0</string>
   <key>NSPrincipalClass</key><string>NSApplication</string>
-  <key>InputMethodConnectionName</key><string>dev.kiyoka.SumibiPrototypeIME.connection</string>
+  <key>InputMethodConnectionName</key><string>dev.kiyoka.inputmethod.SumibiPrototypeProbe1_Connection</string>
   <key>InputMethodServerControllerClass</key><string>SumibiPrototypeInputController</string>
   <key>TISIntendedLanguage</key><string>ja</string>
   <key>tsInputMethodCharacterRepertoireKey</key><array><string>Latn</string><string>Hira</string><string>Kana</string></array>
@@ -26,7 +26,7 @@
     <dict>
       <key>com.apple.inputmethod.Japanese</key>
       <dict>
-        <key>TISInputSourceID</key><string>dev.kiyoka.SumibiPrototypeIME.Japanese</string>
+        <key>TISInputSourceID</key><string>dev.kiyoka.inputmethod.SumibiPrototypeProbe1.Japanese</string>
         <key>TISIntendedLanguage</key><string>ja</string>
         <key>tsInputModeIsVisibleKey</key><true/>
         <key>tsInputModeDefaultStateKey</key><true/>

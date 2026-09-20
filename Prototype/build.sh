@@ -2,15 +2,19 @@
 set -eu
 
 cd "$(dirname "$0")/.."
-swift build --product SumibiPrototypeIME
-prototype_bin_path="$(swift build --show-bin-path)"
+swift build -c release --product SumibiPrototypeIME
+prototype_bin_path="$(swift build -c release --show-bin-path)"
 prototype_bundle=".build/prototype/SumibiPrototypeIME.app"
 prototype_iconset=".build/prototype/PrototypeIcon.iconset"
 mkdir -p "$prototype_bundle/Contents/MacOS"
 mkdir -p "$prototype_bundle/Contents/Resources"
+mkdir -p "$prototype_bundle/Contents/Resources/ja.lproj"
+mkdir -p "$prototype_bundle/Contents/Resources/en.lproj"
 mkdir -p "$prototype_iconset"
 cp "$prototype_bin_path/SumibiPrototypeIME" "$prototype_bundle/Contents/MacOS/"
 cp Prototype/Info.plist "$prototype_bundle/Contents/Info.plist"
+cp Prototype/ja.lproj/InfoPlist.strings "$prototype_bundle/Contents/Resources/ja.lproj/InfoPlist.strings"
+cp Prototype/en.lproj/InfoPlist.strings "$prototype_bundle/Contents/Resources/en.lproj/InfoPlist.strings"
 printf 'APPL????' > "$prototype_bundle/Contents/PkgInfo"
 swift Prototype/Icon.swift "$prototype_bundle/Contents/Resources/PrototypeIcon.tiff" ".build/prototype/PrototypeIcon.png"
 for icon_spec in '16x16:16' '16x16@2x:32' '32x32:32' '32x32@2x:64' \
