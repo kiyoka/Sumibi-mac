@@ -8,7 +8,7 @@
 - `SumibiPrototypeIME`: `IMKServer`と`IMKInputController`を使うIME本体。変換は通信せず、0.6秒後の模擬応答を使う。`ohayou`は`おはよう`、`arigatou`は`ありがとう`、その他は`【原文】`を返す。
 - `Prototype/build.sh`: リリース構成で開発用の`.app`を`.build/prototype/`に作る。入力メソッド用のTIFF、標準アプリアイコン、`PkgInfo`、日英の表示名を含める。既定はアドホック署名。`SUMIBI_PROTOTYPE_SIGN_IDENTITY`に手元のApple Development証明書の名前またはIDを指定すれば開発者署名する。どちらも公証・配布用の署名ではない。
 
-macOS 26以上とXcodeのSwift環境で`swift test`、`sh Prototype/build.sh`を実行する。実機の入力ソースとして試す場合は、`security find-identity -v -p codesigning`で自分のApple Development証明書を確認し、そのIDを`SUMIBI_PROTOTYPE_SIGN_IDENTITY`に指定してビルドする。生成された`.app`を`~/Library/Input Methods/`へコピーする。ただし現状では登録APIからの列挙とシステム設定への表示が一致せず、追加・選択可能とは確認できていない。追加のログアウトは利用者に依頼せず、試作スクリプトからも実行しない。入力ソースは自動選択しない。
+macOS 26以上とXcodeのSwift環境で`swift test`、`sh Prototype/build.sh`を実行する。実機の入力ソースとして試す場合は、`security find-identity -v -p codesigning`で自分のApple Development証明書を確認し、そのIDを`SUMIBI_PROTOTYPE_SIGN_IDENTITY`に指定してビルドする。生成された`.app`を`~/Library/Input Methods/`へコピーする。ただし現状では登録APIからの列挙とシステム設定への表示が一致せず、追加・選択可能とは確認できていない。ログアウトは試作スクリプトから実行せず、利用者の明示的な了承を得てから検証する。入力ソースは自動選択しない。
 
 `swift Prototype/check-registration.swift`は読み取り専用で、登録台帳に本体・日本語モードが存在するかとAPI上の有効状態を表示する。登録APIが成功しただけでシステム設定への表示まで成功したとは判定しない。
 
@@ -50,7 +50,9 @@ macOSや入力先アプリが、`IMKTextInput`の範囲取得・置換・Undo履
 
 新しい試験用識別子に`.inputmethod.`を含め、同時にリリース構成へ変更すると、同じログインセッションで`TISRegisterInputSource`後に本体と日本語モードを列挙できた。識別子とビルド構成を同時に変えたため、どちらが決定的だったかはまだ切り分けていない。入力コントローラーの実際のObjective-Cクラス名がInfo.plistと一致すること、`get-task-allow`の権限が付いていないこと、署名が有効なことも確認した。開発用署名のため`spctl --assess`は配布用アプリとして拒否するが、この環境ではそれでもTIS列挙までは成功した。公証がシステム設定への反映に必要かは未確定である。
 
-`TISEnableInputSource`を試験用モードだけに適用すると、そのプロセスの有効な入力ソース一覧には現れた。しかし、システム設定を開き直しても追加画面には現れなかった。試験後に`TISDisableInputSource`は`noErr`を返したが、別プロセスで再照会するとモードが有効と報告されるため、両APIの返値だけでは永続的な有効状態を判断できない。試作IMEを明示的に選択する操作はしていない。設定画面がログイン時の一覧を保持している可能性があるが、利用者に追加のログインは依頼しない。実アプリでの動作確認が可能になるまで、Issue #4は未完了とする。
+`TISEnableInputSource`を試験用モードだけに適用すると、そのプロセスの有効な入力ソース一覧には現れた。しかし、システム設定を開き直しても追加画面には現れなかった。試験後に`TISDisableInputSource`は`noErr`を返したが、別プロセスで再照会するとモードが有効と報告されるため、両APIの返値だけでは永続的な有効状態を判断できない。
+
+さらに親IME本体は`apiEnabled=false`、日本語モードは`apiEnabled=true`と判明した。使用中のSDKの`TextInputSources.h`によればモードを選ぶには親IMEも有効でなければならない。親本体とモードの両方に`TISEnableInputSource`を適用しても親は無効のままで、`TISSelectInputSource`は`paramErr`（-50）を返した。未使用の標準キーボード配列を一時的に有効化して一覧更新を促したが、システム設定にはSumibiが現れず、その配列は元の無効状態へ戻した。表示サービスの再起動はSIPにより拒否されたため、それ以上のシステムサービス操作は行っていない。試作IMEは選択されておらず、実アプリ入力も未検証である。設定画面がログイン時の一覧を保持している可能性がある。旧識別子の版で2回ログインしても表示されなかったが、新識別子の版ではまだログイン走査を試していない。追加のログインは利用者の了承を得てから1回だけ行い、結果が出なければ同じ操作を繰り返さず原因調査へ戻る。Issue #4は未完了とする。
 
 ## 関連するApple資料
 

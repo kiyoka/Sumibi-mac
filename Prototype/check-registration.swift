@@ -20,6 +20,8 @@ func bundleID(_ source: TISInputSource) -> String? {
 }
 
 var found = false
+var parentEnabled = false
+var modeEnabled = false
 for case let source as TISInputSource in installedSources where bundleID(source) == expectedBundleID {
     guard let id = sourceID(source) else { continue }
     found = true
@@ -27,9 +29,15 @@ for case let source as TISInputSource in installedSources where bundleID(source)
     for case let active as TISInputSource in enabledSources where sourceID(active) == id {
         enabled = true
     }
+    if id == expectedBundleID {
+        parentEnabled = enabled
+    } else if id == expectedBundleID + ".Japanese" {
+        modeEnabled = enabled
+    }
     print("\(id): registered, apiEnabled=\(enabled)")
 }
 
 if !found {
     print("\(expectedBundleID): not registered")
 }
+print("Parent and mode enabled in API: \(parentEnabled && modeEnabled)")
