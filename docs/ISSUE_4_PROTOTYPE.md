@@ -8,7 +8,7 @@
 - `SumibiPrototypeIME`: `IMKServer`と`IMKInputController`を使うIME本体。変換は通信せず、0.6秒後の模擬応答を使う。`ohayou`は`おはよう`、`arigatou`は`ありがとう`、その他は`【原文】`を返す。
 - `Prototype/build.sh`: リリース構成で開発用の`.app`を`.build/prototype/`に作る。入力メソッド用のTIFF、標準アプリアイコン、`PkgInfo`、日英の表示名を含める。既定はアドホック署名。`SUMIBI_PROTOTYPE_SIGN_IDENTITY`に手元のApple Development証明書の名前またはIDを指定すれば開発者署名する。どちらも公証・配布用の署名ではない。
 
-macOS 26以上とXcodeのSwift環境で`swift test`、`sh Prototype/build.sh`を実行する。実機の入力ソースとして試す場合は、`security find-identity -v -p codesigning`で自分のApple Development証明書を確認し、そのIDを`SUMIBI_PROTOTYPE_SIGN_IDENTITY`に指定してビルドする。生成された`.app`を`~/Library/Input Methods/`へコピーする。ただし現状では登録APIからの列挙とシステム設定への表示が一致せず、追加・選択可能とは確認できていない。ログアウトは試作スクリプトから実行せず、利用者の明示的な了承を得てから検証する。入力ソースは自動選択しない。
+macOS 26以上とXcodeのSwift環境で`swift test`、`sh Prototype/build.sh`を実行する。実機の入力ソースとして試す場合は、`security find-identity -v -p codesigning`で自分のApple Development証明書を確認し、そのIDを`SUMIBI_PROTOTYPE_SIGN_IDENTITY`に指定してビルドする。生成された`.app`を`~/Library/Input Methods/`へコピーする。インストール後の表示にはログアウト・ログインが必要になる場合があるが、試作スクリプトからは実行しない。システム設定の「キーボード → 入力ソース → 編集 → 追加」で日本語を選び、「Sumibi 試作版」を追加する。古い登録情報が残る環境では、項目名が`com.apple.inputmethod.Japanese`で、副題だけが「Sumibi 試作版」と表示されることがある。入力ソースは自動選択しない。
 
 `swift Prototype/check-registration.swift`は読み取り専用で、登録台帳に本体・日本語モードが存在するかとAPI上の有効状態を表示する。登録APIが成功しただけでシステム設定への表示まで成功したとは判定しない。
 
@@ -22,13 +22,14 @@ macOS 26以上とXcodeのSwift環境で`swift test`、`sh Prototype/build.sh`を
 | 状態管理の自動テスト | 11件成功。初回結果後の待機文字、連続`Control + J`、失敗時の原文維持・入力順序・明示的な再試行、1,000文字の境界、候補切替の条件、入力先変更後の救済と遅延応答破棄を確認 |
 | 開発用IMEの起動 | `open -n -a`でプロセス起動を確認 |
 | 入力ソース登録 | 旧識別子`dev.kiyoka.SumibiPrototypeIME`では、2回のログイン後も登録APIが`noErr`を返すだけで、全入力ソース照会に現れなかった。新しい試験用識別子`dev.kiyoka.inputmethod.SumibiPrototypeProbe1`とリリース構成では、再登録直後に本体と日本語モードを照会でき、別プロセスからも確認できた |
-| システム設定への表示 | 新識別子を登録後、システム設定を開き直しても「入力ソースを追加」の日本語一覧と`Sumibi`検索にはまだ現れない。実アプリの選択・入力は未確認 |
+| システム設定への表示 | 新識別子のアプリを置いてログアウト・ログイン後、日本語一覧の`com.apple.inputmethod.Japanese`という名称で発見。副題は「Sumibi 試作版」。追加後、本体と日本語モードの両方がAPI上で有効となり、モード選択APIも成功した |
+| 実アプリへの入力 | TextEditで自動操作による`ohayou`と`Control + J`を試したが、期待する`おはよう`への変換は観察できなかった。自動操作が通常の物理キー入力と同じ経路を通るか未確定。人手による確認が必要 |
 
 試作IMEは`~/Library/Input Methods/SumibiPrototypeIME.app`に配置済み。これは開発用の一時的な設置で、配布経路の成立性を意味しない。
 
 ## 実アプリで未検証の項目
 
-入力ソースとして選択できていないため、下記は**成功と判定していない**。
+入力ソースの追加と選択はできたが、下記の実動作は**成功と判定していない**。
 
 1. メモなどの標準テキスト欄で、英字追跡表示、初回`Control + J`の確定、2回目の候補表示・置換を確認する。
 2. 通常Enterが改行1回、送信欄では送信1回となり、原文が欠落・重複しないことを確認する。
@@ -52,7 +53,11 @@ macOSや入力先アプリが、`IMKTextInput`の範囲取得・置換・Undo履
 
 `TISEnableInputSource`を試験用モードだけに適用すると、そのプロセスの有効な入力ソース一覧には現れた。しかし、システム設定を開き直しても追加画面には現れなかった。試験後に`TISDisableInputSource`は`noErr`を返したが、別プロセスで再照会するとモードが有効と報告されるため、両APIの返値だけでは永続的な有効状態を判断できない。
 
-さらに親IME本体は`apiEnabled=false`、日本語モードは`apiEnabled=true`と判明した。使用中のSDKの`TextInputSources.h`によればモードを選ぶには親IMEも有効でなければならない。親本体とモードの両方に`TISEnableInputSource`を適用しても親は無効のままで、`TISSelectInputSource`は`paramErr`（-50）を返した。未使用の標準キーボード配列を一時的に有効化して一覧更新を促したが、システム設定にはSumibiが現れず、その配列は元の無効状態へ戻した。表示サービスの再起動はSIPにより拒否されたため、それ以上のシステムサービス操作は行っていない。試作IMEは選択されておらず、実アプリ入力も未検証である。設定画面がログイン時の一覧を保持している可能性がある。旧識別子の版で2回ログインしても表示されなかったが、新識別子の版ではまだログイン走査を試していない。追加のログインは利用者の了承を得てから1回だけ行い、結果が出なければ同じ操作を繰り返さず原因調査へ戻る。Issue #4は未完了とする。
+さらに、システム設定へ追加する前は親IME本体が`apiEnabled=false`、日本語モードが`apiEnabled=true`と判明した。使用中のSDKの`TextInputSources.h`によればモードを選ぶには親IMEも有効でなければならない。親本体とモードの両方に`TISEnableInputSource`を適用しても親は無効のままで、`TISSelectInputSource`は`paramErr`（-50）を返した。未使用の標準キーボード配列を一時的に有効化して一覧更新を促したが、当時はシステム設定にSumibiが現れず、その配列は元の無効状態へ戻した。表示サービスの再起動はSIPにより拒否されたため、それ以上のシステムサービス操作は行っていない。
+
+新識別子の版でログアウト・ログインした後、日本語一覧を調べ直すと`com.apple.inputmethod.Japanese`という項目があり、副題が「Sumibi 試作版」だった。`Sumibi`検索では候補が消えるため見落としていた。`InfoPlist.strings`にモード識別子を書いていたが、一覧に用いるキーは`ComponentInputModeDict`のモードキー`com.apple.inputmethod.Japanese`だったため修正した。追加すると親IME本体も有効となり、`TISSelectInputSource`は`noErr`を返した。修正版を署名して上書きした後も、このセッションの設定画面には旧名称がキャッシュされている。表示名の更新には追加調査が必要であり、再ログインを繰り返して解決する方針は取らない。
+
+TextEditで自動操作のキー入力を試したところ、試作IMEのプロセスは起動したが、模擬変換は起こらなかった。自動操作がIME経由のキーイベントを再現できていない可能性と、試作IMEがキーを受け取っていない可能性の両方が残る。人手で入力ソースを選択して物理キーボードから試すまで、実アプリ動作の成立は未確認とする。Issue #4は未完了である。
 
 ## 関連するApple資料
 
