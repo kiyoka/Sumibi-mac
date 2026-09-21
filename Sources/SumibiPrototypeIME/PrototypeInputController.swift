@@ -4,14 +4,14 @@ import InputMethodKit
 import SumibiPrototypeCore
 
 private struct ReplacementAnchor {
-    let clientID: String
+    let clientToken: ObjectIdentifier
     var end: Int
     var text: String
 }
 
 private struct PendingTarget {
     let requestID: Int
-    let clientID: String
+    let clientToken: ObjectIdentifier
     let selection: NSRange
     let expectedText: String
     let kind: PendingRequest.Kind
@@ -22,7 +22,7 @@ final class PrototypeInputController: IMKInputController {
     private let state = InputSession()
     private var anchor: ReplacementAnchor?
     private var pendingTarget: PendingTarget?
-    private var trackedClientID: String?
+    private var trackedClientToken: ObjectIdentifier?
     private var candidatePanel: IMKCandidates?
     private var rescuedText = ""
     private var deferredControls: [String] = []
@@ -30,7 +30,7 @@ final class PrototypeInputController: IMKInputController {
 
     override func handle(_ event: NSEvent, client sender: Any) -> Bool {
         guard event.type == .keyDown, let input = sender as? IMKTextInput else { return false }
-        if let trackedClientID, trackedClientID != input.uniqueClientIdentifierString() {
+        if let trackedClientToken, trackedClientToken != clientToken(for: input) {
             cancelForTargetChange()
         }
         guard let key = decode(event) else {
@@ -51,7 +51,7 @@ final class PrototypeInputController: IMKInputController {
 
     override func deactivateServer(_ sender: Any!) {
         if let input = sender as? IMKTextInput,
-           trackedClientID == input.uniqueClientIdentifierString(), !state.marked.isEmpty {
+           trackedClientToken == clientToken(for: input), !state.marked.isEmpty {
             input.insertText(state.marked, replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
             cancelForTargetChange(rescueMarked: false)
         } else {
@@ -155,14 +155,14 @@ final class PrototypeInputController: IMKInputController {
             case .marked(let text):
                 input.setMarkedText(text, selectionRange: NSRange(location: text.utf16.count, length: 0),
                                     replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
-                trackedClientID = text.isEmpty ? nil : input.uniqueClientIdentifierString()
+                trackedClientToken = text.isEmpty ? nil : clientToken(for: input)
             case .commit(let text):
                 input.insertText(text, replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
-                trackedClientID = nil
+                trackedClientToken = nil
                 if state.previous?.result == text {
                     let selection = input.selectedRange()
                     if selection.location != NSNotFound, selection.length == 0 {
-                        anchor = ReplacementAnchor(clientID: input.uniqueClientIdentifierString(),
+                        anchor = ReplacementAnchor(clientToken: clientToken(for: input),
                                                    end: selection.location, text: text)
                     }
                 }
@@ -173,13 +173,13 @@ final class PrototypeInputController: IMKInputController {
             case .passConvert(let deferred):
                 if deferred { deferredControls.append("Control-J") } else { passToClient = true }
             case .startFirst(let id, let source):
-                pendingTarget = PendingTarget(requestID: id, clientID: input.uniqueClientIdentifierString(),
+                pendingTarget = PendingTarget(requestID: id, clientToken: clientToken(for: input),
                                               selection: input.selectedRange(), expectedText: source, kind: .first)
                 let mode = UserDefaults.standard.string(forKey: "PrototypeResponseMode") ?? "success"
                 let delay = mode == "timeout" ? 60.0 : 0.6
                 perform(#selector(finishRequest(_:)), with: NSNumber(value: id), afterDelay: delay)
             case .startAlternatives(let id, _, let current):
-                pendingTarget = PendingTarget(requestID: id, clientID: input.uniqueClientIdentifierString(),
+                pendingTarget = PendingTarget(requestID: id, clientToken: clientToken(for: input),
                                               selection: input.selectedRange(), expectedText: current,
                                               kind: .alternatives)
                 let mode = UserDefaults.standard.string(forKey: "PrototypeResponseMode") ?? "success"
@@ -197,7 +197,8 @@ final class PrototypeInputController: IMKInputController {
                 input.insertText(new, replacementRange: range)
                 let selection = input.selectedRange()
                 if selection.location != NSNotFound, selection.length == 0 {
-                    self.anchor = ReplacementAnchor(clientID: anchor.clientID, end: selection.location, text: new)
+                    self.anchor = ReplacementAnchor(clientToken: anchor.clientToken,
+                                                    end: selection.location, text: new)
                 } else {
                     self.anchor = nil
                 }
@@ -215,11 +216,18 @@ final class PrototypeInputController: IMKInputController {
         return validatesAnchor(in: input, expected: previous.result)
     }
 
+    /// `uniqueClientIdentifierString()` is backed by `globallyUniqueString` and may
+    /// return a different value on every call. Object identity is stable for the
+    /// lifetime of the IMK client proxy associated with this controller.
+    private func clientToken(for input: IMKTextInput) -> ObjectIdentifier {
+        ObjectIdentifier(input as AnyObject)
+    }
+
     private func validatesPendingTarget(_ request: PendingRequest, in input: IMKTextInput) -> Bool {
         guard let target = pendingTarget,
               target.requestID == request.id,
               target.kind == request.kind,
-              target.clientID == input.uniqueClientIdentifierString(),
+              target.clientToken == clientToken(for: input),
               target.selection == input.selectedRange() else { return false }
         if request.kind == .alternatives {
             return validatesAnchor(in: input, expected: target.expectedText)
@@ -233,7 +241,7 @@ final class PrototypeInputController: IMKInputController {
 
     private func validatesAnchor(in input: IMKTextInput, expected: String) -> Bool {
         guard let anchor,
-              anchor.clientID == input.uniqueClientIdentifierString(),
+              anchor.clientToken == clientToken(for: input),
               anchor.text == expected,
               anchor.end >= anchor.text.utf16.count else { return false }
         let selection = input.selectedRange()
@@ -248,6 +256,6 @@ final class PrototypeInputController: IMKInputController {
         for case .rescueText(let text) in effects { rescuedText += text }
         anchor = nil
         pendingTarget = nil
-        trackedClientID = nil
+        trackedClientToken = nil
     }
 }
