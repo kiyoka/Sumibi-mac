@@ -7,6 +7,7 @@ import SumibiPrototypeCore
 struct SettingsStore {
     private enum Key {
         static let providerConfiguration = "providerConfiguration"
+        static let consentEndpoint = "aiDataSharingConsentEndpoint"
     }
 
     private let defaults: UserDefaults
@@ -27,5 +28,20 @@ struct SettingsStore {
 
     func saveProviderConfiguration(_ configuration: ProviderConfiguration) throws {
         defaults.set(try encoder.encode(configuration), forKey: Key.providerConfiguration)
+    }
+
+    /// データ送信への同意は送信先ごとに持つ。送信先を変えたら同意を取り直す。
+    func hasConsent(for endpoint: String) -> Bool {
+        let normalized = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return false }
+        return defaults.string(forKey: Key.consentEndpoint) == normalized
+    }
+
+    func saveConsent(for endpoint: String) {
+        defaults.set(endpoint.trimmingCharacters(in: .whitespacesAndNewlines), forKey: Key.consentEndpoint)
+    }
+
+    func revokeConsent() {
+        defaults.removeObject(forKey: Key.consentEndpoint)
     }
 }

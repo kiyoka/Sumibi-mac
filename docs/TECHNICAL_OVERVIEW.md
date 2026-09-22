@@ -304,6 +304,18 @@ BYOKの設定とデフォルトOFFの文脈利用設定をmacOS版の仕様に�
 - 入力内容、変換対象、周辺文脈の本文: 永続保存しない
 - 利用状況の集計値: 入力本文を含めず端末内に保存する
 
+### 実装済みの部分（変換処理）
+
+BYOKでの実変換は実装済みである。
+
+- `Sources/SumibiPrototypeCore/Conversion.swift`: 要求の型、1,000文字の上限、プロンプト組み立て、候補の取り出し。OSに依存せず自動テストの対象。
+- `Sources/SumibiPrototypeCore/OpenAICompatibleClient.swift`: OpenAI互換のchat completions APIへの要求。エンドポイントの補完（`https://api.openai.com` → `…/v1/chat/completions`）、状態コードの分類、タイムアウト60秒。模擬応答の`MockConversionService`も同じ場所にある。
+- `Sources/SumibiPrototypeIME/Conversion/ConversionCoordinator.swift`: 設定とKeychainから送信先を組み立てる。APIキーが未設定、またはデータ送信への同意がない場合は通信しない。
+- プロンプトと候補の指示は、iOS版の`OpenAICompatibleClient`の文面に合わせている。コードは共有しない。
+- 送信への同意は送信先ごとに`UserDefaults`へ保存し、APIのURLを変えたら取り消す。
+- 開発用に`PrototypeResponseMode`で模擬応答へ切り替えられる。`api`（既定・実際に通信する）、`success`、`slow`、`failure`、`timeout`。
+- 周辺文脈、ユーザー辞書、文体プリセット、利用状況の記録は未実装。プロンプトでは「登録されていません」「指示はありません」として送る。
+
 ### 実装済みの部分（API設定）
 
 API設定（APIのURL、モデル名、APIキー）は実装済みである。
