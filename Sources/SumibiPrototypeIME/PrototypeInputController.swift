@@ -58,6 +58,8 @@ final class PrototypeRuntime {
     fileprivate var pendingOutcome: PendingOutcome?
     /// 実行中の変換要求。入力先が変わったら取り消す。
     fileprivate var conversionTask: Task<Void, Never>?
+    /// 選択変換を始めたときの選択範囲。
+    fileprivate var selectionRange: NSRange?
     /// 初回変換の応答待ちの間、原文を通常の文字として確定済みかどうか。
     fileprivate var originalCommitted = false
 }
@@ -142,6 +144,16 @@ final class PrototypeInputController: IMKInputController {
             diag.notice("handle id=\(self.diagID, privacy: .public) decode=nil")
             if state.pending != nil { cancelForTargetChange() }
             return false
+        }
+        // 未確定文字列がなく、追加候補にもならない`Control + J`は、選択範囲の変換として扱う。
+        if key == .convert, state.pending == nil, state.marked.isEmpty, !validatesPrevious(in: input),
+           let selection = readSelection(in: input) {
+            let effects = state.convertSelection(selection.text)
+            runtime.selectionRange = selection.range
+            let consumed = apply(effects, to: input)
+            if consumed { runtime.lastConsumedAt = Date() }
+            diag.notice("convert selection length=\(selection.text.count, privacy: .public) effects=\(effects.count, privacy: .public)")
+            return consumed
         }
         let wasPending = state.pending != nil
         let effects = state.receive(key, canReplacePrevious: validatesPrevious(in: input))
@@ -327,6 +339,10 @@ final class PrototypeInputController: IMKInputController {
         case .alternatives:
             let alternatives: [String]? = if case .alternatives(let list) = outcome { list } else { nil }
             effects = state.completeAlternatives(id: request.id, alternatives: alternatives)
+        case .selection:
+            let result: String? = if case .first(let text) = outcome, !text.isEmpty { text } else { nil }
+            effects = state.completeSelection(id: request.id, result: result)
+            runtime.selectionRange = nil
         }
         _ = apply(effects, to: input)
     }
@@ -392,6 +408,21 @@ final class PrototypeInputController: IMKInputController {
                 pokeClient(input)
                 startConversion(id: id, request: ConversionRequest(source: source, mode: .alternatives,
                                                                    currentConversion: current))
+            case .startSelection(let id, let source):
+                // 選択範囲を同じ文字列で置き換える。表示は変わらないが、この書き込みが
+                // 新しい入力セッションを作らせ、応答を届けられるようにする。
+                // 置換位置の記録(アンカー)も、未確定文字列からの変換と同じ形になる。
+                let range = runtime.selectionRange ?? input.selectedRange()
+                input.insertText(source, replacementRange: range)
+                let caret = input.selectedRange()
+                if caret.location != NSNotFound, caret.length == 0 {
+                    anchor = ReplacementAnchor(end: caret.location, text: source)
+                } else {
+                    anchor = ReplacementAnchor(end: range.location + range.length, text: source)
+                }
+                pendingTarget = PendingTarget(requestID: id, selection: input.selectedRange(),
+                                              expectedText: source, kind: .selection)
+                startConversion(id: id, request: ConversionRequest(source: source))
             case .showCandidates:
                 let anchorRect = lineRectNearCaret(in: input) ?? runtime.lastLineRect
                 let topLeft = anchorRect.map { NSPoint(x: $0.minX, y: $0.minY) } ?? NSEvent.mouseLocation
@@ -429,6 +460,18 @@ final class PrototypeInputController: IMKInputController {
             if rect.height > 0 { return rect }
         }
         return nil
+    }
+
+    /// 選択範囲とその文字列。読めない入力先ではnilを返し、何も書き換えない。
+    private func readSelection(in input: any IMKTextInput) -> (range: NSRange, text: String)? {
+        let range = input.selectedRange()
+        guard range.location != NSNotFound, range.length > 0 else { return nil }
+        guard let text = input.attributedSubstring(from: range)?.string, !text.isEmpty else {
+            diag.notice("selection could not be read length=\(range.length, privacy: .public)")
+            lastError = "この入力先では、選択した文字列を読み取れませんでした。"
+            return nil
+        }
+        return (range, text)
     }
 
     /// 入力先へ無害な書き込みを行い、新しい入力セッションを作らせる。
@@ -480,9 +523,9 @@ final class PrototypeInputController: IMKInputController {
         guard let target = pendingTarget,
               target.requestID == request.id,
               target.kind == request.kind else { return false }
-        // 初回変換も追加候補も、確定済みの文字列(アンカー)を置換する。
+        // いずれの要求も、記録した位置(アンカー)に記録した文字列がまだあることを確かめてから置換する。
         let ok = target.selection == input.selectedRange() && validatesAnchor(in: input, expected: target.expectedText)
-        diag.notice("validate \(request.kind == .first ? "first" : "alternatives", privacy: .public): ok=\(ok, privacy: .public)")
+        diag.notice("validate \(String(describing: request.kind), privacy: .public): ok=\(ok, privacy: .public)")
         return ok
     }
 
@@ -490,9 +533,15 @@ final class PrototypeInputController: IMKInputController {
         guard let anchor,
               anchor.text == expected,
               anchor.end >= anchor.text.utf16.count else { return false }
-        let selection = input.selectedRange()
-        guard selection.location == anchor.end, selection.length == 0 else { return false }
         let range = NSRange(location: anchor.end - anchor.text.utf16.count, length: anchor.text.utf16.count)
+        // 入力先によって、置換したあとのカーソルの形が違う。メモは末尾のカーソル、Chromeは選択範囲が残る。
+        // どちらも「記録した位置に記録した文字列がまだある」ことに変わりはないので、両方を認める。
+        let selection = input.selectedRange()
+        let caretAtEnd = selection.location == anchor.end && selection.length == 0
+        guard caretAtEnd || selection == range else {
+            diag.notice("anchor rejected: selection=\(selection.location, privacy: .public),\(selection.length, privacy: .public) anchor=\(range.location, privacy: .public),\(range.length, privacy: .public)")
+            return false
+        }
         return input.attributedSubstring(from: range)?.string == anchor.text
     }
 

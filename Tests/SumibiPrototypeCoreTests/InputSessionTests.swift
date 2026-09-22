@@ -113,4 +113,43 @@ final class InputSessionTests: XCTestCase {
         XCTAssertEqual(session.completeFirst(id: 2, result: "変換"),
                        [.commit("変換"), .marked("xyz")])
     }
+
+    func testSelectionConversionReplacesTheSelectedText() {
+        let session = InputSession()
+        XCTAssertEqual(session.convertSelection("ohayou"), [.startSelection(id: 1, source: "ohayou")])
+        XCTAssertEqual(session.completeSelection(id: 1, result: "おはよう"),
+                       [.replacePrevious(from: "ohayou", to: "おはよう")])
+        // 変換後は同じ位置での追加候補に進める。
+        XCTAssertEqual(session.receive(.convert, canReplacePrevious: true),
+                       [.startAlternatives(id: 2, source: "ohayou", current: "おはよう")])
+    }
+
+    func testFailedSelectionConversionLeavesTheDocumentAlone() {
+        let session = InputSession()
+        _ = session.convertSelection("ohayou")
+        XCTAssertEqual(session.completeSelection(id: 1, result: nil), [])
+        XCTAssertNil(session.previous)
+        XCTAssertEqual(session.marked, "")
+    }
+
+    func testKeysTypedDuringSelectionConversionApplyAfterwards() {
+        let session = InputSession()
+        _ = session.convertSelection("ohayou")
+        XCTAssertEqual(session.receive(.text("a")), [])
+        XCTAssertEqual(session.completeSelection(id: 1, result: "おはよう"),
+                       [.replacePrevious(from: "ohayou", to: "おはよう"), .marked("a")])
+    }
+
+    func testSelectionIsNotConvertedWhileSomethingElseIsPending() {
+        let session = InputSession()
+        _ = session.receive(.text("abc"))
+        _ = session.receive(.convert)
+        XCTAssertEqual(session.convertSelection("ohayou"), [])
+    }
+
+    func testSelectionOverTheLimitIsRejected() {
+        let session = InputSession()
+        XCTAssertEqual(session.convertSelection(String(repeating: "a", count: 1_001)), [.overLimit])
+        XCTAssertNil(session.pending)
+    }
 }
