@@ -13,6 +13,13 @@ private struct ReplacementAnchor {
     var text: String
 }
 
+/// 変換要求の結果。入力先へ書き込めるようになるまで保持する。
+private enum PendingOutcome {
+    case first(String)
+    case alternatives([String])
+    case failure(ConversionError)
+}
+
 private struct PendingTarget {
     let requestID: Int
     let selection: NSRange
@@ -45,8 +52,12 @@ final class PrototypeRuntime {
     fileprivate var panelTopLeft: NSPoint?
     /// 候補窓を出しているべきか。セッション終了で隠れた場合に出し直す判断に使う。
     fileprivate var panelShouldBeVisible = false
-    /// 保留中の応答が返ってくる(模擬では返ってきたことにする)時刻。
+    /// 応答が返った時刻。返るまでは nil。
     fileprivate var pendingReadyAt: Date?
+    /// 返ってきた応答。入力先へ書き込める状態になるまで持っておく。
+    fileprivate var pendingOutcome: PendingOutcome?
+    /// 実行中の変換要求。入力先が変わったら取り消す。
+    fileprivate var conversionTask: Task<Void, Never>?
     /// 初回変換の応答待ちの間、原文を通常の文字として確定済みかどうか。
     fileprivate var originalCommitted = false
 }
@@ -215,11 +226,39 @@ final class PrototypeInputController: IMKInputController {
 
     @objc private func discardRescuedText() { rescuedText = "" }
 
-    private func scheduleFinish(id: Int, delay: TimeInterval, retry: Bool = false) {
-        if !retry {
-            runtime.finishRetries = 0
-            runtime.pendingReadyAt = Date().addingTimeInterval(delay)
+    /// 変換を要求し、結果が返ったら入力先へ届ける。
+    private func startConversion(id: Int, request: ConversionRequest) {
+        runtime.finishRetries = 0
+        runtime.pendingReadyAt = nil
+        runtime.pendingOutcome = nil
+        runtime.conversionTask?.cancel()
+        let kind: (ConversionResult) -> PendingOutcome = { result in
+            switch request.mode {
+            case .first: .first(result.candidates.first ?? "")
+            case .alternatives: .alternatives(result.candidates)
+            }
         }
+        runtime.conversionTask = Task { [runtime] in
+            let outcome = await ConversionCoordinator().convert(request)
+            if Task.isCancelled { return }
+            await MainActor.run {
+                guard runtime.state.pending?.id == id else { return }
+                switch outcome {
+                case .success(let result):
+                    runtime.pendingOutcome = kind(result)
+                    diag.notice("conversion succeeded id=\(id) candidates=\(result.candidates.count)")
+                case .failure(let error):
+                    runtime.pendingOutcome = .failure(error)
+                    diag.notice("conversion failed id=\(id) retryable=\(error.isRetryable)")
+                }
+                runtime.pendingReadyAt = Date()
+                (runtime.latest ?? runtime.lastHandler)?.finishRequest(NSNumber(value: id))
+            }
+        }
+    }
+
+    private func scheduleFinish(id: Int, delay: TimeInterval, retry: Bool = false) {
+        if !retry { runtime.finishRetries = 0 }
         runtime.finishTimer?.cancel()
         let work = DispatchWorkItem { [runtime] in
             let target = runtime.latest ?? runtime.lastHandler
@@ -259,13 +298,15 @@ final class PrototypeInputController: IMKInputController {
             cancelForTargetChange()
             return
         }
+        guard let outcome = runtime.pendingOutcome else { return }
         pendingTarget = nil
-        let succeeds = Self.responseSucceeds
+        runtime.pendingOutcome = nil
+        runtime.pendingReadyAt = nil
+        if case .failure(let error) = outcome { lastError = error.message }
         let effects: [SessionEffect]
-        if !succeeds { lastError = "試作の変換要求が失敗またはタイムアウトしました" }
         switch request.kind {
         case .first:
-            let result = succeeds ? mockFirst(request.source) : nil
+            let result: String? = if case .first(let text) = outcome, !text.isEmpty { text } else { nil }
             var firstEffects = state.completeFirst(id: request.id, result: result)
             if runtime.originalCommitted {
                 runtime.originalCommitted = false
@@ -284,42 +325,10 @@ final class PrototypeInputController: IMKInputController {
             }
             effects = firstEffects
         case .alternatives:
-            effects = state.completeAlternatives(
-                id: request.id,
-                alternatives: succeeds ? mockAlternatives(request.source) : nil
-            )
+            let alternatives: [String]? = if case .alternatives(let list) = outcome { list } else { nil }
+            effects = state.completeAlternatives(id: request.id, alternatives: alternatives)
         }
         _ = apply(effects, to: input)
-    }
-
-    /// 応答モード。`defaults write dev.kiyoka.inputmethod.SumibiPrototypeProbe1 PrototypeResponseMode -string <mode>`で切り替える。
-    /// success(0.6秒で成功)、slow(5秒で成功。応答待ち中の入力を手で試すため)、failure、timeout(60秒)。
-    private static var responseMode: String {
-        UserDefaults.standard.string(forKey: "PrototypeResponseMode") ?? "success"
-    }
-
-    private static var responseDelay: TimeInterval {
-        switch responseMode {
-        case "timeout": 60.0
-        case "slow": 5.0
-        default: 0.6
-        }
-    }
-
-    private static var responseSucceeds: Bool {
-        responseMode == "success" || responseMode == "slow"
-    }
-
-    private func mockFirst(_ source: String) -> String {
-        switch source.lowercased() {
-        case "ohayou": "おはよう"
-        case "arigatou": "ありがとう"
-        default: "【\(source)】"
-        }
-    }
-
-    private func mockAlternatives(_ source: String) -> [String] {
-        (1...10).map { "候補\($0)・\(mockFirst(source))" }
     }
 
     private func decode(_ event: NSEvent) -> InputKey? {
@@ -374,16 +383,15 @@ final class PrototypeInputController: IMKInputController {
                     anchor = nil
                 }
                 pendingTarget = PendingTarget(requestID: id, selection: caret, expectedText: source, kind: .first)
-                let delay = Self.responseDelay
-                scheduleFinish(id: id, delay: delay)
-            case .startAlternatives(let id, _, let current):
+                startConversion(id: id, request: ConversionRequest(source: source))
+            case .startAlternatives(let id, let source, let current):
                 pendingTarget = PendingTarget(requestID: id, selection: input.selectedRange(),
                                               expectedText: current,
                                               kind: .alternatives)
                 // 追加候補の要求では入力先へ何も書かないため、次のセッションを作らせるためにつつく。
                 pokeClient(input)
-                let delay = Self.responseDelay
-                scheduleFinish(id: id, delay: delay)
+                startConversion(id: id, request: ConversionRequest(source: source, mode: .alternatives,
+                                                                   currentConversion: current))
             case .showCandidates:
                 let anchorRect = lineRectNearCaret(in: input) ?? runtime.lastLineRect
                 let topLeft = anchorRect.map { NSPoint(x: $0.minX, y: $0.minY) } ?? NSEvent.mouseLocation
@@ -491,6 +499,10 @@ final class PrototypeInputController: IMKInputController {
     private func cancelForTargetChange(rescueMarked: Bool = true) {
         runtime.finishTimer?.cancel()
         runtime.finishTimer = nil
+        runtime.conversionTask?.cancel()
+        runtime.conversionTask = nil
+        runtime.pendingOutcome = nil
+        runtime.pendingReadyAt = nil
         hideCandidatePanel()
         // 原文を確定済みなら、すでに入力先にあるので保留文字として救済しない。
         let effects = state.cancelForTargetChange(rescueMarked: rescueMarked && !runtime.originalCommitted)
