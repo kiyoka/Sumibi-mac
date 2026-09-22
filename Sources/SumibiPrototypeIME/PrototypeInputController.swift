@@ -185,6 +185,8 @@ final class PrototypeInputController: IMKInputController {
 
     override func menu() -> NSMenu! {
         let menu = NSMenu(title: "Sumibi Prototype")
+        menu.addItem(withTitle: "Sumibi設定…", action: #selector(openSettings), keyEquivalent: "")
+        menu.addItem(.separator())
         if !rescuedText.isEmpty {
             menu.addItem(withTitle: "保留文字をコピー", action: #selector(copyRescuedText), keyEquivalent: "")
             menu.addItem(withTitle: "保留文字を破棄", action: #selector(discardRescuedText), keyEquivalent: "")
@@ -200,6 +202,10 @@ final class PrototypeInputController: IMKInputController {
             menu.addItem(item)
         }
         return menu
+    }
+
+    @objc private func openSettings() {
+        MainActor.assumeIsolated { SettingsWindowController.shared.show() }
     }
 
     @objc private func copyRescuedText() {
