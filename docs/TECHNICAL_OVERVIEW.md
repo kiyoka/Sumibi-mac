@@ -304,6 +304,18 @@ BYOKの設定とデフォルトOFFの文脈利用設定をmacOS版の仕様に�
 - 入力内容、変換対象、周辺文脈の本文: 永続保存しない
 - 利用状況の集計値: 入力本文を含めず端末内に保存する
 
+### 実装済みの部分（API設定）
+
+API設定（APIのURL、モデル名、APIキー）は実装済みである。
+
+- 画面: `Sources/SumibiPrototypeIME/Settings/APISettingsView.swift`。SwiftUIの`Form`をNSHostingViewでウィンドウへ載せる。
+- 入口: 当面はIMEメニューの「Sumibi設定…」。メニューバー常駐は別Issue。IMEは`LSUIElement`のアプリのため、ウィンドウを出す直前に活性化ポリシーを`.accessory`へ切り替えて前面に出す。
+- APIのURLとモデル名: `UserDefaults`のキー`providerConfiguration`へJSONで保存する。項目名と既定値はiOS版の`ProviderConfiguration`に合わせる。
+- APIキー: Keychainの汎用パスワード。サービス名`org.sumibi.Sumibi-mac.api-key`、アカウント`default`、`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`、iCloud同期なし。サービス名をバンドル識別子から作らないのは、識別子を変えたときに保存済みのキーを失わないためである。
+- 画面にはキーそのものを出さず、末尾4文字だけを残した伏せ字を表示する。
+- APIのURLは`https`を必須とし、`http`は`localhost`・`127.0.0.1`・`::1`に限って許す。手元で動かすLLMサーバーを試せるようにするためである。
+- 開発中に画面だけを確認する場合は、アプリを`--settings`付きで起動する。入力メソッドとしては動かず、設定ウィンドウだけを開く。
+
 ## 10. インストールと有効化
 
 InputMethodKitを使用するアプリは、通常のmacOSアプリとは起動方法が異なる。
