@@ -15,6 +15,8 @@ public enum SessionEffect: Equatable {
     case passConvert(deferred: Bool)
     case startFirst(id: Int, source: String)
     case startAlternatives(id: Int, source: String, current: String)
+    /// 入力先で選択されている文字列を、そのまま変換対象にする。
+    case startSelection(id: Int, source: String)
     case showCandidates([String])
     case replacePrevious(from: String, to: String)
     case overLimit
@@ -27,7 +29,7 @@ public struct PreviousConversion: Equatable {
 }
 
 public struct PendingRequest: Equatable {
-    public enum Kind: Equatable { case first, alternatives }
+    public enum Kind: Equatable { case first, alternatives, selection }
     public let id: Int
     public let kind: Kind
     public let source: String
@@ -51,6 +53,33 @@ public final class InputSession {
             return []
         }
         return apply(key, deferred: false, canReplacePrevious: canReplacePrevious)
+    }
+
+    /// 入力先で選択されている文字列を変換対象にする。未確定文字列がなく、要求も出ていないときだけ受け付ける。
+    ///
+    /// 置換は入力先の範囲を直接書き換えるため、範囲の記録と照合はアダプター側が行う。
+    public func convertSelection(_ selection: String) -> [SessionEffect] {
+        guard pending == nil, marked.isEmpty, !selection.isEmpty else { return [] }
+        guard selection.count <= 1_000 else { return [.overLimit] }
+        let id = nextRequestID
+        nextRequestID += 1
+        previous = nil
+        candidateStrings = []
+        pending = PendingRequest(id: id, kind: .selection, source: selection)
+        return [.startSelection(id: id, source: selection)]
+    }
+
+    public func completeSelection(id: Int, result: String?) -> [SessionEffect] {
+        guard let request = pending, request.id == id, request.kind == .selection else { return [] }
+        pending = nil
+        candidateStrings = []
+        guard let converted = result.flatMap({ $0.isEmpty ? nil : $0 }) else {
+            // 失敗しても入力先の文字列は元のままなので、書き換えない。
+            previous = nil
+            return drainQueue()
+        }
+        previous = PreviousConversion(source: request.source, result: converted)
+        return [.replacePrevious(from: request.source, to: converted)] + drainQueue()
     }
 
     public func completeFirst(id: Int, result: String?) -> [SessionEffect] {
