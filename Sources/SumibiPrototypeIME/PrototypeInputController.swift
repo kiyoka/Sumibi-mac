@@ -423,17 +423,25 @@ final class PrototypeInputController: IMKInputController {
     /// 入力先へ何も書かないため、そのままでは新しいセッションが生まれず、応答が返っても書き込む先がない。
     /// 入力先への書き込みがセッション再作成の契機になることが分かったので、明示的に空文字を書く。
     private func pokeClient(_ input: (any IMKTextInput)?) {
-        guard let input else { return }
+        // 方式は`defaults write dev.kiyoka.inputmethod.SumibiPrototypeProbe1 PrototypePokeStyle -string <style>`で選ぶ。
+        // marked(既定): 文書を変えない空の未確定文字列のみ。insert: 空文字の挿入のみ。both: 両方。off: 何もしない。
+        let style = UserDefaults.standard.string(forKey: "PrototypePokeStyle") ?? "marked"
+        guard style != "off", let input else {
+            diag.notice("poke skipped style=\(style, privacy: .public)")
+            return
+        }
         let caret = input.selectedRange()
         guard caret.location != NSNotFound else { return }
         let notFound = NSRange(location: NSNotFound, length: NSNotFound)
-        // 入力先によって効く呼び出しが違う。メモは空文字の挿入で新しいセッションを作るが、
-        // TextEditは作らないため、空の未確定文字列の設定も試す。どちらも表示は変えない。
-        // 未確定状態を開いたままにすると、入力先が後続の置換まで1つのUndoへまとめてしまう。
-        // そのため最後に空文字を挿入して、未確定状態を必ず閉じる。
-        input.setMarkedText("", selectionRange: NSRange(location: 0, length: 0), replacementRange: notFound)
-        input.insertText("", replacementRange: NSRange(location: caret.location, length: caret.length))
-        diag.notice("poke client at \(caret.location, privacy: .public),\(caret.length, privacy: .public)")
+        // 空文字の挿入は文書の変更として扱われ、入力先のUndoのまとまりを壊すことがある
+        // (TextEditでは利用者自身の入力まで1つのUndoにまとめられた)。既定では行わない。
+        if style == "marked" || style == "both" {
+            input.setMarkedText("", selectionRange: NSRange(location: 0, length: 0), replacementRange: notFound)
+        }
+        if style == "insert" || style == "both" {
+            input.insertText("", replacementRange: NSRange(location: caret.location, length: caret.length))
+        }
+        diag.notice("poke client style=\(style, privacy: .public) at \(caret.location, privacy: .public),\(caret.length, privacy: .public)")
     }
 
     /// 応答が返っていて、このコントローラーの入力先が生きていれば、保留中の変換を完了させる。
