@@ -435,12 +435,9 @@ final class PrototypeInputController: IMKInputController {
                 guard validatesAnchor(in: input, expected: old), let anchor else { break }
                 let range = NSRange(location: anchor.end - anchor.text.utf16.count, length: anchor.text.utf16.count)
                 input.insertText(new, replacementRange: range)
-                let selection = input.selectedRange()
-                if selection.location != NSNotFound, selection.length == 0 {
-                    self.anchor = ReplacementAnchor(end: selection.location, text: new)
-                } else {
-                    self.anchor = nil
-                }
+                // 置換後の位置は、書き込んだ範囲から決める。Chromeは書き込み直後に
+                // 古いカーソル位置を返すことがあり、それを信じると次の置換位置がずれる。
+                self.anchor = ReplacementAnchor(end: range.location + new.utf16.count, text: new)
             case .overLimit:
                 lastError = "変換対象は1,000文字までです"
             case .rescueText(let text):
