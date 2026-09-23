@@ -17,7 +17,10 @@ enum PrototypeMain {
             fatalError("The prototype must run from its input-method app bundle")
         }
         withExtendedLifetime(server) {
-            NSApplication.shared.run()
+            // `NSApp`はNSApplicationを一度触るまでnilなので、メニューバーより先に用意する。
+            let app = NSApplication.shared
+            MainActor.assumeIsolated { MenuBarController.shared.install() }
+            app.run()
         }
     }
 }
