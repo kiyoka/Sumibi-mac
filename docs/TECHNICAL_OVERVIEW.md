@@ -293,7 +293,7 @@ BYOKの設定とデフォルトOFFの文脈利用設定をmacOS版の仕様に�
 
 設定画面への入口は、macOSのメニューバーに常時表示するSumibi専用アイコンとする。アイコンをクリックして表示するメニューの「Sumibi設定…」から、設定ウィンドウを開く。macOS標準の入力ソース切替メニューとは別に提供し、Sumibi IMEが選択されていない間も利用できるようにする。
 
-このため、メニューバーの表示と設定画面の起動は、IMEの入力セッションの有効・無効に依存しない構成にする。常駐部分のプロセス構成やログイン時の起動方法は、インストール・配布方式の検討時に具体化する。
+このため、メニューバーの表示と設定画面の起動は、IMEの入力セッションの有効・無効に依存しない構成にする。構成は下の「実装済みの部分（メニューバー常駐）」を参照する。
 
 アイコン素材はiOS版の`SumibiApp/Assets.xcassets/AppIcon.appiconset/AppIcon.png`をベースにする。形状・モチーフを保ち、少し濃い色に調整したmacOS版の素材をSumibi-mac側で独立して管理する。これは画像素材の流用であり、コードや共通パッケージの共有ではない。iOS版の元画像は変更しない。具体的な色味は両版の比較プレビューで決め、メニューバー用の小さい表示でも明暗の背景に対して見やすいことを確認する。
 
@@ -343,12 +343,37 @@ BYOKでの実変換は実装済みである。
 API設定（APIのURL、モデル名、APIキー）は実装済みである。
 
 - 画面: `Sources/SumibiPrototypeIME/Settings/APISettingsView.swift`。SwiftUIの`Form`をNSHostingViewでウィンドウへ載せる。
-- 入口: 当面はIMEメニューの「Sumibi設定…」。メニューバー常駐は別Issue。IMEは`LSUIElement`のアプリのため、ウィンドウを出す直前に活性化ポリシーを`.accessory`へ切り替えて前面に出す。
+- 入口: メニューバーのSumibiアイコンと、IMEメニューの「Sumibi設定…」。IMEは`LSUIElement`のアプリのため、ウィンドウを出す直前に活性化ポリシーを`.accessory`へ切り替えて前面に出す。
 - APIのURLとモデル名: `UserDefaults`のキー`providerConfiguration`へJSONで保存する。項目名と既定値はiOS版の`ProviderConfiguration`に合わせる。
 - APIキー: Keychainの汎用パスワード。サービス名`org.sumibi.Sumibi-mac.api-key`、アカウント`default`、`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`、iCloud同期なし。サービス名をバンドル識別子から作らないのは、識別子を変えたときに保存済みのキーを失わないためである。
 - 画面にはキーそのものを出さず、末尾4文字だけを残した伏せ字を表示する。
 - APIのURLは`https`を必須とし、`http`は`localhost`・`127.0.0.1`・`::1`に限って許す。手元で動かすLLMサーバーを試せるようにするためである。
 - 開発中に画面だけを確認する場合は、アプリを`--settings`付きで起動する。入力メソッドとしては動かず、設定ウィンドウだけを開く。
+
+### 実装済みの部分（メニューバー常駐）
+
+メニューバーのSumibiアイコンと、そこから設定を開くメニューは実装済みである。
+
+- コード: `Sources/SumibiPrototypeIME/MenuBar/MenuBarController.swift`。`NSStatusItem`を起動時に1つ作る。
+- **IMEと同じプロセスに置く。** 入力ソースとしてSumibiが選ばれていなくても、プロセスが動いている間はアイコンが出続ける。別プロセスのヘルパーにしなかったのは、設定（`UserDefaults`）とKeychainを共有するためにApp Groupやアクセスグループが要り、署名と配布の手間が増えるためである。設定画面で保存した値を、変換がそのまま読めるという利点もある。
+- **ログイン時の起動。** ログイン直後はSumibiを一度も選ばなければIMEのプロセスが起動せず、アイコンも出ない。そこでIMEのアプリ自身を`SMAppService.mainApp`でログイン項目へ登録する。IMEのプロセスが先に動いていても、Sumibiを選べばIMKはそのプロセスへ接続する。`open`で起動したプロセスのまま入力コントローラーが作られ`activateServer`が呼ばれること、2つ目のプロセスが起動しないことを確認した（2026-09-23）。
+- 登録は初回起動時に自動で行う。`SMAppService.mainApp.status`は、一度も登録していない状態でも`.notRegistered`ではなく`.notFound`を返した（macOS 27、`~/Library/Input Methods`に置いた場合）。このため、`.enabled`・`.requiresApproval`以外なら登録を試す。
+- メニューの「ログイン時に起動」で登録を取り消せる。取り消したことは`UserDefaults`のキー`MenuBarLoginItemOptOut`に記録し、次に起動したときも自動では登録し直さない。システム設定の「ログイン項目」で切られた場合（`.requiresApproval`）は、アプリからは戻せないため、メニューからその設定画面を開く。
+- メニュー: 「Sumibi設定…」「ログイン時に起動」。エラーの印と詳細の表示は、失敗の知らせ方を決める別Issue（#12）で追加する。
+- アイコン: iOS版の`AppIcon.png`（橙地に黒の線画）から線画だけを取り出したテンプレート画像。`Prototype/MenuBarIcon.swift`で作り、生成物の`Prototype/Resources/MenuBarIcon.png`・`MenuBarIcon@2x.png`（18pt）をリポジトリで管理する。iOS版の元画像は変更しない。テンプレート画像なので、システムが他のメニューバー項目と同じ色（明るい背景では黒、暗い背景では白）で描く。
+
+確認したこと（2026-09-23、macOS 27。IMKの接続を除き、入力ソースは`ABC`のまま）:
+
+| 項目 | 結果 |
+| --- | --- |
+| Sumibiを選ばずにプロセスを起動したときのアイコン | 表示された |
+| メニューの表示 | 「Sumibi設定…」と、チェック付きの「ログイン時に起動」が出た |
+| 「Sumibi設定…」 | 設定ウィンドウが開いた |
+| `open`で起動したプロセスへのIMKの接続 | 同じプロセスで`activateServer`まで届いた。メモで`ohayou` → `Control + J`の変換も成功した |
+| ログイン項目への登録 | `status`が`.enabled`になった |
+| 暗いメニューバーでの見え方 | 白で描かれ、他のアイコンと並べて判別できた |
+| 明るいメニューバーでの見え方 | 拡大プレビューでだけ確認。試したMacではメニューバーの色が壁紙で決まり、外観をライトにしても明るくならなかった |
+| ログイン時の自動起動 | 未確認。次にログインしたときに確かめる |
 
 ## 10. インストールと有効化
 
