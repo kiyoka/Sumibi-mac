@@ -380,6 +380,10 @@ final class PrototypeInputController: IMKInputController {
         let marked = input.markedRange()
         diag.notice("finishRequest: selected=\(selection.location, privacy: .public),\(selection.length, privacy: .public) marked=\(marked.location, privacy: .public),\(marked.length, privacy: .public) target=\(self.pendingTarget?.selection.location ?? -1, privacy: .public),\(self.pendingTarget?.selection.length ?? -1, privacy: .public)")
         reanchorIfCaretLagged(request, in: input)
+        if !validatesPendingTarget(request, in: input) {
+            reportTargetMismatch(in: input)
+            reanchorAtCaret(request, in: input)
+        }
         guard validatesPendingTarget(request, in: input) else {
             diag.notice("finishRequest: target validation failed")
             cancelForTargetChange()
@@ -617,6 +621,57 @@ final class PrototypeInputController: IMKInputController {
         self.anchor = ReplacementAnchor(end: selection.location, text: anchor.text)
         pendingTarget = PendingTarget(requestID: target.requestID, selection: selection,
                                       expectedText: target.expectedText, kind: target.kind)
+    }
+
+    /// ターミナルで動く全画面のアプリ(Claude Codeなど)は、行の折り返しなどで画面を描き直し、文字の位置番号がずれる。
+    /// 応答待ちの間に打ったキーは入力先へ書かずに溜めているので、書き込んだ文字はカーソルの直前に残っているはずである。
+    /// カーソルの直前に記録した文字列があれば、そこを置換位置として記録し直す。
+    private func reanchorAtCaret(_ request: PendingRequest, in input: IMKTextInput) {
+        guard let target = pendingTarget, target.requestID == request.id, target.kind == request.kind,
+              let anchor, anchor.text == target.expectedText else { return }
+        let length = anchor.text.utf16.count
+        let selection = input.selectedRange()
+        guard selection.location != NSNotFound, selection.length == 0, selection.location >= length,
+              input.attributedSubstring(from: NSRange(location: selection.location - length, length: length))?.string == anchor.text
+        else {
+            diag.notice("reanchor at caret: source not found before caret=\(selection.location, privacy: .public)")
+            return
+        }
+        diag.notice("reanchor at caret: moved anchor \(anchor.end, privacy: .public) -> \(selection.location, privacy: .public)")
+        self.anchor = ReplacementAnchor(end: selection.location, text: anchor.text)
+        pendingTarget = PendingTarget(requestID: target.requestID, selection: selection,
+                                      expectedText: target.expectedText, kind: target.kind)
+    }
+
+    /// 記録した位置の文字列が一致しなかったとき、入力先が何を返したかを内容を出さずに記録する。
+    /// 返った長さ、最初に食い違う位置、その位置の文字の種類だけを出す。
+    private func reportTargetMismatch(in input: IMKTextInput) {
+        guard let anchor, anchor.end >= anchor.text.utf16.count else {
+            diag.notice("mismatch: no anchor")
+            return
+        }
+        let range = NSRange(location: anchor.end - anchor.text.utf16.count, length: anchor.text.utf16.count)
+        guard let actual = input.attributedSubstring(from: range)?.string else {
+            diag.notice("mismatch: substring unavailable range=\(range.location, privacy: .public),\(range.length, privacy: .public)")
+            return
+        }
+        let expected = Array(anchor.text.unicodeScalars)
+        let returned = Array(actual.unicodeScalars)
+        let offset = zip(expected, returned).enumerated().first { $0.element.0 != $0.element.1 }?.offset
+            ?? min(expected.count, returned.count)
+        let kind: String
+        if offset < returned.count {
+            let scalar = returned[offset]
+            kind = if CharacterSet.newlines.contains(scalar) { "newline" }
+                else if CharacterSet.whitespaces.contains(scalar) { "space" }
+                else if CharacterSet.controlCharacters.contains(scalar) { "control" }
+                else if scalar.properties.generalCategory == .privateUse { "privateUse" }
+                else if scalar.isASCII { "ascii" }
+                else { "other" }
+        } else {
+            kind = "end"
+        }
+        diag.notice("mismatch: range=\(range.location, privacy: .public),\(range.length, privacy: .public) expectedScalars=\(expected.count, privacy: .public) returnedScalars=\(returned.count, privacy: .public) firstDiff=\(offset, privacy: .public) returnedKind=\(kind, privacy: .public)")
     }
 
     private func validatesAnchor(in input: IMKTextInput, expected: String) -> Bool {
