@@ -480,6 +480,11 @@ final class PrototypeInputController: IMKInputController {
                     anchor = nil
                 }
                 pendingTarget = PendingTarget(requestID: id, selection: caret, expectedText: source, kind: .first)
+                if UserDefaults.standard.bool(forKey: "PrototypeDiagnoseText"), caret.location != NSNotFound {
+                    let start = max(0, caret.location - source.utf16.count - 40)
+                    let around = input.attributedSubstring(from: NSRange(location: start, length: caret.location - start))?.string ?? "(nil)"
+                    diag.notice("text: after commit caret=\(caret.location, privacy: .public) \(start, privacy: .public)..<\(caret.location, privacy: .public)=[\(around.replacingOccurrences(of: "\n", with: "\\n"), privacy: .public)]")
+                }
                 startConversion(id: id, request: ConversionRequest(source: source))
             case .startAlternatives(let id, let source, let current):
                 pendingTarget = PendingTarget(requestID: id, selection: input.selectedRange(),
@@ -672,6 +677,25 @@ final class PrototypeInputController: IMKInputController {
             kind = "end"
         }
         diag.notice("mismatch: range=\(range.location, privacy: .public),\(range.length, privacy: .public) expectedScalars=\(expected.count, privacy: .public) returnedScalars=\(returned.count, privacy: .public) firstDiff=\(offset, privacy: .public) returnedKind=\(kind, privacy: .public)")
+        reportTargetText(in: input, recorded: range, actual: actual)
+    }
+
+    /// 調査用。`defaults write dev.kiyoka.inputmethod.SumibiPrototypeProbe1 PrototypeDiagnoseText -bool true`のときだけ、
+    /// 入力先が返した文字列そのもの(入力内容と周囲の表示)を記録する。調べ終えたら`defaults delete`で戻す。
+    private func reportTargetText(in input: IMKTextInput, recorded range: NSRange, actual: String) {
+        guard UserDefaults.standard.bool(forKey: "PrototypeDiagnoseText"), let anchor else { return }
+        let visible: (String) -> String = { text in
+            text.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\n", with: "\\n")
+                .replacingOccurrences(of: "\r", with: "\\r").replacingOccurrences(of: "\t", with: "\\t")
+        }
+        let caret = input.selectedRange().location
+        let span = anchor.text.utf16.count + 40
+        let start = max(0, caret == NSNotFound ? 0 : caret - span)
+        let beforeCaret = caret == NSNotFound ? "" :
+            input.attributedSubstring(from: NSRange(location: start, length: caret - start))?.string ?? "(nil)"
+        diag.notice("text: expected=[\(visible(anchor.text), privacy: .public)]")
+        diag.notice("text: recorded \(range.location, privacy: .public)+\(range.length, privacy: .public)=[\(visible(actual), privacy: .public)]")
+        diag.notice("text: before caret \(start, privacy: .public)..<\(caret, privacy: .public)=[\(visible(beforeCaret), privacy: .public)]")
     }
 
     private func validatesAnchor(in input: IMKTextInput, expected: String) -> Bool {
