@@ -345,6 +345,17 @@ BYOKでの実変換は実装済みである。
 | TextEdit | できる | できる |
 | Google Chrome | できる | できる（選択範囲が残る） |
 
+### 実装済みの部分（対象外のアプリ）
+
+Emacs.appの中では変換を行わず、キーをすべてEmacsへそのまま渡す（仕様は[仕様書の3.5](SPEC.md#35-対象外のアプリ)）。
+
+- 判定: 入力先の`bundleIdentifier()`を、`Sources/SumibiPrototypeCore/ExcludedApplications.swift`の一覧と大文字小文字を区別せずに比べる。一覧は`org.gnu.Emacs`と`org.gnu.Aquamacs`。GNU Emacs本体・Emacs Mac PortのInfo.plistは`org.gnu.Emacs`、Aquamacsは`org.gnu.Aquamacs`であることを各配布元のソースで確かめた。emacs-plusはGNU Emacsのソースをそのままビルドするため、識別子も同じである。識別子が得られない入力先は対象外にしない。
+- `handle(_:client:)`: 対象外のアプリでは、キーを解釈する前に`false`を返す。`Control + J`はEmacsの`C-j`として動く。
+- 他のアプリの入力を終える: 対象外のアプリで`activateServer`または`handle`が呼ばれたとき、他のアプリで追跡中・応答待ち中・候補窓の表示中なら、別アプリへの切り替えと同じ`cancelForTargetChange()`で終える。変換要求は取り消し、未確定だった文字は保留文字としてIMEメニューから救済できる。
+- 書き込み先から外す: 状態はプロセス全体で1つ（`PrototypeRuntime`）のため、応答の書き込み先を探す`liveInput()`と`completeIfReady`から、対象外のアプリの入力先を除く。対象外のアプリのセッションは`runtime.latest`にしない。
+- `deactivateServer`・`commitComposition`: 対象外のアプリでは何もしない。何も書いていないので確定するものがなく、ここで状態を消すと移った先の入力を壊しうる。
+- IMEメニュー: 入力先が対象外のアプリのとき、選択できない項目「Emacs.appではEmacs版のSumibiを使ってください」を出す。
+
 ### 実装済みの部分（API設定）
 
 API設定（APIのURL、モデル名、APIキー）は実装済みである。

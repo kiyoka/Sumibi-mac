@@ -80,7 +80,8 @@ final class PrototypeInputController: IMKInputController {
 
     override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
         super.init(server: server, delegate: delegate, client: inputClient)
-        runtime.latest = self
+        // 対象外のアプリのセッションは、応答の書き込み先にしない。
+        if !isExcluded(inputClient) { runtime.latest = self }
         // 新しいセッションは入力先が生きているので、返っている応答があればここで完了させる。
         DispatchQueue.main.async { [weak self] in self?.completeIfReady(reason: "new session") }
         let clientObject = inputClient as AnyObject?
@@ -92,12 +93,22 @@ final class PrototypeInputController: IMKInputController {
 
     override func activateServer(_ sender: Any!) {
         diag.notice("activateServer id=\(self.diagID, privacy: .public) marked=\(self.state.marked.count)")
+        if isExcluded(sender) {
+            leaveForExcludedApplication()
+            super.activateServer(sender)
+            return
+        }
         runtime.latest = self
         DispatchQueue.main.async { [weak self] in self?.completeIfReady(reason: "activate") }
         super.activateServer(sender)
     }
 
     override func handle(_ event: NSEvent, client sender: Any) -> Bool {
+        // 対象外のアプリでは、どのキーも加工せず入力先へ渡す。`Control + J`もアプリ自身の操作として動く。
+        if isExcluded(sender) {
+            leaveForExcludedApplication()
+            return false
+        }
         runtime.latest = self
         runtime.lastHandler = self
         let before = state.marked.count
@@ -167,7 +178,7 @@ final class PrototypeInputController: IMKInputController {
 
     override func commitComposition(_ sender: Any!) {
         diag.notice("commitComposition id=\(self.diagID, privacy: .public) marked=\(self.state.marked.count) isIMKTextInput=\(sender is IMKTextInput)")
-        guard let input = sender as? IMKTextInput else { return }
+        guard let input = sender as? IMKTextInput, !isExcluded(input) else { return }
         // 確定直後にも未確定文字列なしで呼ばれる。そのとき直前の変換結果と置換位置を消すと、2回目の変換ができなくなる。
         guard !state.marked.isEmpty, !runtime.originalCommitted else { return }
         input.insertText(state.marked, replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
@@ -176,6 +187,11 @@ final class PrototypeInputController: IMKInputController {
 
     override func deactivateServer(_ sender: Any!) {
         diag.notice("deactivateServer id=\(self.diagID, privacy: .public) marked=\(self.state.marked.count) isIMKTextInput=\(sender is IMKTextInput)")
+        // 対象外のアプリには何も書いていない。ここで状態を消すと、次に移った先の入力を壊しうる。
+        if isExcluded(sender) {
+            super.deactivateServer(sender)
+            return
+        }
         // 消費したキーの直後に来る終了通知は、実際のフォーカス移動ではないので状態を維持する。
         if Date().timeIntervalSince(runtime.lastConsumedAt) < 0.3 {
             super.deactivateServer(sender)
@@ -210,6 +226,11 @@ final class PrototypeInputController: IMKInputController {
         let menu = NSMenu(title: "Sumibi Prototype")
         menu.addItem(withTitle: "Sumibi設定…", action: #selector(openSettings), keyEquivalent: "")
         menu.addItem(.separator())
+        if isExcluded(client()) {
+            let item = NSMenuItem(title: "Emacs.appではEmacs版のSumibiを使ってください", action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+        }
         if !rescuedText.isEmpty {
             menu.addItem(withTitle: "保留文字をコピー", action: #selector(copyRescuedText), keyEquivalent: "")
             menu.addItem(withTitle: "保留文字を破棄", action: #selector(discardRescuedText), keyEquivalent: "")
@@ -284,7 +305,7 @@ final class PrototypeInputController: IMKInputController {
     /// セッション終了後は入力先へ書き込めない瞬間がある。生きた入力先が現れるまで0.25秒ごとに再試行する(最大約60秒)。
     private func liveInput() -> (any IMKTextInput)? {
         for candidate in [client() as (any IMKTextInput)?, runtime.latest?.client() as (any IMKTextInput)?, runtime.lastInput] {
-            if let candidate, candidate.selectedRange().location != NSNotFound { return candidate }
+            if let candidate, !isExcluded(candidate), candidate.selectedRange().location != NSNotFound { return candidate }
         }
         return nil
     }
@@ -501,7 +522,8 @@ final class PrototypeInputController: IMKInputController {
     /// 応答が返っていて、このコントローラーの入力先が生きていれば、保留中の変換を完了させる。
     private func completeIfReady(reason: String) {
         guard let request = state.pending, let readyAt = runtime.pendingReadyAt, Date() >= readyAt,
-              let input = client() as (any IMKTextInput)?, input.selectedRange().location != NSNotFound else { return }
+              let input = client() as (any IMKTextInput)?, !isExcluded(input),
+              input.selectedRange().location != NSNotFound else { return }
         diag.notice("completing pending request on \(reason, privacy: .public) id=\(self.diagID, privacy: .public) request=\(request.id, privacy: .public)")
         finishRequest(NSNumber(value: request.id), using: input)
     }
@@ -540,6 +562,20 @@ final class PrototypeInputController: IMKInputController {
             return false
         }
         return input.attributedSubstring(from: range)?.string == anchor.text
+    }
+
+    /// 入力先がSumibiの対象外のアプリか。仕様書の「3.5 対象外のアプリ」を参照する。
+    private func isExcluded(_ client: Any?) -> Bool {
+        ExcludedApplications.contains((client as? IMKTextInput)?.bundleIdentifier())
+    }
+
+    /// 対象外のアプリへ移ったとき、他のアプリで進めていた入力を、別アプリへの切り替えと同じく終える。
+    /// 変換結果や待機中の文字を対象外のアプリへ書き込まない。
+    private func leaveForExcludedApplication() {
+        let active = state.pending != nil || !state.marked.isEmpty || state.previous != nil || runtime.panelShouldBeVisible
+        guard active else { return }
+        diag.notice("excluded application: ending the current input id=\(self.diagID, privacy: .public)")
+        cancelForTargetChange()
     }
 
     private func cancelForTargetChange(rescueMarked: Bool = true) {
