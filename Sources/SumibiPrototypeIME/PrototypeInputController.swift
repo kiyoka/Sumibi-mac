@@ -62,6 +62,8 @@ final class PrototypeRuntime {
     fileprivate var selectionRange: NSRange?
     /// 初回変換の応答待ちの間、原文を通常の文字として確定済みかどうか。
     fileprivate var originalCommitted = false
+    /// 右Commandを押してから離すまでの見張り。
+    fileprivate var commandTapTimer: DispatchSourceTimer?
 }
 
 @objc(SumibiPrototypeInputController)
@@ -103,6 +105,11 @@ final class PrototypeInputController: IMKInputController {
         super.activateServer(sender)
     }
 
+    /// 修飾キーだけの押し下げ(右Commandのタップ)も受け取る。
+    override func recognizedEvents(_ sender: Any!) -> Int {
+        Int(NSEvent.EventTypeMask([.keyDown, .flagsChanged]).rawValue)
+    }
+
     override func handle(_ event: NSEvent, client sender: Any) -> Bool {
         // 対象外のアプリでは、どのキーも加工せず入力先へ渡す。`Control + J`もアプリ自身の操作として動く。
         if isExcluded(sender) {
@@ -112,8 +119,17 @@ final class PrototypeInputController: IMKInputController {
         runtime.latest = self
         runtime.lastHandler = self
         let before = state.marked.count
-        diag.notice("handle id=\(self.diagID, privacy: .public) type=\(event.type.rawValue) keyCode=\(event.keyCode) markedBefore=\(before) isIMKTextInput=\(sender is IMKTextInput)")
+        diag.notice("handle id=\(self.diagID, privacy: .public) type=\(event.type.rawValue) keyCode=\(event.keyCode) modifiers=\(event.modifierFlags.intersection(.deviceIndependentFlagsMask).rawValue, privacy: .public) markedBefore=\(before) isIMKTextInput=\(sender is IMKTextInput)")
+        if event.type == .flagsChanged {
+            if let input = sender as? IMKTextInput { watchCommandTap(event, in: input) }
+            return false
+        }
         guard event.type == .keyDown, let input = sender as? IMKTextInput else { return false }
+        return process(decode(event), keyCode: event.keyCode, in: input)
+    }
+
+    /// 解釈したキーを処理する。右Commandのタップは、キーコードなしの`Control + J`としてここへ来る。
+    private func process(_ decoded: InputKey?, keyCode: UInt16?, in input: IMKTextInput) -> Bool {
         runtime.lastInput = input
         // 応答は返っているのに、セッション終了で入力先へ書き込めなかった場合は、生きた入力先が確実にあるこの時点で完了させる。
         if let request = state.pending, let readyAt = runtime.pendingReadyAt, Date() >= readyAt {
@@ -130,20 +146,20 @@ final class PrototypeInputController: IMKInputController {
         }
         // 候補窓の表示中は、移動・決定・取消のキーを自前の選択位置で処理する。それ以外のキーでは候補窓を閉じる。
         if runtime.panelShouldBeVisible {
-            switch event.keyCode {
-            case 125, 126:
-                candidateWindow.move(by: event.keyCode == 125 ? 1 : -1)
-                diag.notice("candidate move key=\(event.keyCode, privacy: .public) index=\(self.candidateWindow.selectedIndex, privacy: .public)")
+            switch keyCode {
+            case 125?, 126?:
+                candidateWindow.move(by: keyCode == 125 ? 1 : -1)
+                diag.notice("candidate move key=\(keyCode ?? 0, privacy: .public) index=\(self.candidateWindow.selectedIndex, privacy: .public)")
                 runtime.lastConsumedAt = Date()
                 return true
-            case 123, 124:
+            case 123?, 124?:
                 runtime.lastConsumedAt = Date()
                 return true
-            case 36, 76:
+            case 36?, 76?:
                 chooseCandidate(at: candidateWindow.selectedIndex, in: input)
                 runtime.lastConsumedAt = Date()
                 return true
-            case 53:
+            case 53?:
                 hideCandidatePanel()
                 runtime.lastConsumedAt = Date()
                 return true
@@ -151,7 +167,7 @@ final class PrototypeInputController: IMKInputController {
                 hideCandidatePanel()
             }
         }
-        guard let key = decode(event) else {
+        guard let key = decoded else {
             diag.notice("handle id=\(self.diagID, privacy: .public) decode=nil")
             if state.pending != nil { cancelForTargetChange() }
             return false
@@ -170,10 +186,47 @@ final class PrototypeInputController: IMKInputController {
         let effects = state.receive(key, canReplacePrevious: validatesPrevious(in: input))
         // 応答待ち中のキーは溜めるだけで入力先へ書き込まない。次のセッションを作らせるためにつつく。
         if wasPending, effects.isEmpty { pokeClient(input) }
-        let result = apply(effects, to: input)
+        // 「かな」キーは変換するものがなくても入力先へ渡さない。ABC配列の入力先では意味を持たない。
+        let result = apply(effects, to: input) || keyCode == Self.kanaKeyCode
         if result { runtime.lastConsumedAt = Date() }
         diag.notice("handle id=\(self.diagID, privacy: .public) effects=\(effects.count) markedAfter=\(self.state.marked.count) consumed=\(result)")
         return result
+    }
+
+    /// 右Commandを押したら、離すまでキーボードの状態を見張る。離したことの通知は入力先によって届かないため使わない。
+    /// 他のキーやクリックを挟まずに短く押して離したら、`Control + J`と同じ変換の操作として扱う。
+    private func watchCommandTap(_ event: NSEvent, in input: IMKTextInput) {
+        let flags = event.modifierFlags.intersection([.shift, .control, .option, .command])
+        guard event.keyCode == 54, flags.contains(.command) else { return }
+        runtime.commandTapTimer?.cancel()
+        let started = Date()
+        let counts = Self.inputCounts()
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + 0.02, repeating: 0.02)
+        timer.setEventHandler { [self] in
+            let held = CGEventSource.flagsState(.combinedSessionState).contains(.maskCommand)
+            let duration = Date().timeIntervalSince(started)
+            if held, duration <= CommandTap.maximumDuration { return }
+            timer.cancel()
+            runtime.commandTapTimer = nil
+            let tap = !held && CommandTap.isTap(duration: duration, onlyCommand: flags == .command,
+                                                otherInput: Self.inputCounts() != counts)
+            diag.notice("right command released tap=\(tap, privacy: .public) held=\(held, privacy: .public) duration=\(Int(duration * 1000), privacy: .public)ms")
+            guard tap, !isExcluded(input), input.selectedRange().location != NSNotFound else { return }
+            _ = process(.convert, keyCode: nil, in: input)
+        }
+        runtime.commandTapTimer = timer
+        timer.resume()
+    }
+
+    /// JISキーボードの「かな」キー(kVK_JIS_Kana)。
+    private static let kanaKeyCode: UInt16 = 104
+
+    /// これまでに押されたキーとマウスボタンの累計。右Commandを押している間に増えたら、組み合わせ操作とみなす。
+    private static func inputCounts() -> [UInt32] {
+        [CGEventType.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown].map {
+            CGEventSource.counterForEventType(.combinedSessionState, eventType: $0)
+        }
     }
 
     override func commitComposition(_ sender: Any!) {
@@ -371,6 +424,8 @@ final class PrototypeInputController: IMKInputController {
 
     private func decode(_ event: NSEvent) -> InputKey? {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        // 「かな」キーも変換キーとして扱う。JISキーボードのかなキーのほか、Kanaryなどが右Commandのタップをかなキーに変えて送ってくる。
+        if event.keyCode == Self.kanaKeyCode { return .convert }
         if modifiers.contains(.control), event.charactersIgnoringModifiers?.lowercased() == "j" {
             return .convert
         }
