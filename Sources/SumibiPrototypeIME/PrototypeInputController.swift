@@ -326,6 +326,7 @@ final class PrototypeInputController: IMKInputController {
         let selection = input.selectedRange()
         let marked = input.markedRange()
         diag.notice("finishRequest: selected=\(selection.location, privacy: .public),\(selection.length, privacy: .public) marked=\(marked.location, privacy: .public),\(marked.length, privacy: .public) target=\(self.pendingTarget?.selection.location ?? -1, privacy: .public),\(self.pendingTarget?.selection.length ?? -1, privacy: .public)")
+        reanchorIfCaretLagged(request, in: input)
         guard validatesPendingTarget(request, in: input) else {
             diag.notice("finishRequest: target validation failed")
             cancelForTargetChange()
@@ -546,6 +547,21 @@ final class PrototypeInputController: IMKInputController {
         let ok = target.selection == input.selectedRange() && validatesAnchor(in: input, expected: target.expectedText)
         diag.notice("validate \(String(describing: request.kind), privacy: .public): ok=\(ok, privacy: .public)")
         return ok
+    }
+
+    /// ターミナルは書き込んだ文字を少し遅れて反映し、書き込んだ直後のカーソル位置は原文の手前のままになる。
+    /// 応答時のカーソルが記録より原文の長さだけ後ろにあり、その直前に原文があれば、書き込みが反映されたものとして位置を改める。
+    private func reanchorIfCaretLagged(_ request: PendingRequest, in input: IMKTextInput) {
+        guard request.kind == .first, let target = pendingTarget, target.requestID == request.id,
+              let anchor, anchor.text == target.expectedText, anchor.end == target.selection.location else { return }
+        let length = anchor.text.utf16.count
+        let selection = input.selectedRange()
+        guard selection.length == 0, selection.location == anchor.end + length,
+              input.attributedSubstring(from: NSRange(location: anchor.end, length: length))?.string == anchor.text else { return }
+        diag.notice("finishRequest: caret caught up with the written source; re-anchoring")
+        self.anchor = ReplacementAnchor(end: selection.location, text: anchor.text)
+        pendingTarget = PendingTarget(requestID: target.requestID, selection: selection,
+                                      expectedText: target.expectedText, kind: target.kind)
     }
 
     private func validatesAnchor(in input: IMKTextInput, expected: String) -> Bool {
