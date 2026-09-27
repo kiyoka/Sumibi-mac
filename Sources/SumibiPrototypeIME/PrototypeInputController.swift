@@ -11,6 +11,16 @@ private let diag = Logger(subsystem: "dev.kiyoka.inputmethod.SumibiPrototypeProb
 private struct ReplacementAnchor {
     var end: Int
     var text: String
+    /// 入力先の文書上での長さ(UTF-16)。ターミナルで折り返して表示された原文は、改行と字下げの分だけ`text`より長い。
+    var span: Int
+
+    init(end: Int, text: String, span: Int? = nil) {
+        self.end = end
+        self.text = text
+        self.span = span ?? text.utf16.count
+    }
+
+    var range: NSRange { NSRange(location: end - span, length: span) }
 }
 
 /// 変換要求の結果。入力先へ書き込めるようになるまで保持する。
@@ -380,6 +390,10 @@ final class PrototypeInputController: IMKInputController {
         let marked = input.markedRange()
         diag.notice("finishRequest: selected=\(selection.location, privacy: .public),\(selection.length, privacy: .public) marked=\(marked.location, privacy: .public),\(marked.length, privacy: .public) target=\(self.pendingTarget?.selection.location ?? -1, privacy: .public),\(self.pendingTarget?.selection.length ?? -1, privacy: .public)")
         reanchorIfCaretLagged(request, in: input)
+        if !validatesPendingTarget(request, in: input) {
+            reportTargetMismatch(in: input)
+            reanchorAtCaret(request, in: input)
+        }
         guard validatesPendingTarget(request, in: input) else {
             diag.notice("finishRequest: target validation failed")
             cancelForTargetChange()
@@ -404,7 +418,7 @@ final class PrototypeInputController: IMKInputController {
                     }
                 } else if let a = anchor {
                     // 失敗: 原文を未確定文字列に戻し、応答中に溜めた文字を続けられるようにする。
-                    let range = NSRange(location: a.end - a.text.utf16.count, length: a.text.utf16.count)
+                    let range = a.range
                     input.setMarkedText(MarkedTextStyle.attributed(request.source), selectionRange: NSRange(location: request.source.utf16.count, length: 0),
                                         replacementRange: range)
                     anchor = nil
@@ -476,6 +490,11 @@ final class PrototypeInputController: IMKInputController {
                     anchor = nil
                 }
                 pendingTarget = PendingTarget(requestID: id, selection: caret, expectedText: source, kind: .first)
+                if UserDefaults.standard.bool(forKey: "PrototypeDiagnoseText"), caret.location != NSNotFound {
+                    let start = max(0, caret.location - source.utf16.count - 40)
+                    let around = input.attributedSubstring(from: NSRange(location: start, length: caret.location - start))?.string ?? "(nil)"
+                    diag.notice("text: after commit caret=\(caret.location, privacy: .public) \(start, privacy: .public)..<\(caret.location, privacy: .public)=[\(around.replacingOccurrences(of: "\n", with: "\\n"), privacy: .public)]")
+                }
                 startConversion(id: id, request: ConversionRequest(source: source))
             case .startAlternatives(let id, let source, let current):
                 pendingTarget = PendingTarget(requestID: id, selection: input.selectedRange(),
@@ -510,7 +529,7 @@ final class PrototypeInputController: IMKInputController {
                 diag.notice("showCandidates count=\(self.state.candidateStrings.count, privacy: .public) visible=\(self.candidateWindow.isVisible, privacy: .public) anchor=\(anchorRect.map { NSStringFromRect($0) } ?? "none", privacy: .public) topLeft=\(NSStringFromPoint(topLeft), privacy: .public)")
             case .replacePrevious(let old, let new):
                 guard validatesAnchor(in: input, expected: old), let anchor else { break }
-                let range = NSRange(location: anchor.end - anchor.text.utf16.count, length: anchor.text.utf16.count)
+                let range = anchor.range
                 input.insertText(new, replacementRange: range)
                 // 置換後の位置は、書き込んだ範囲から決める。Chromeは書き込み直後に
                 // 古いカーソル位置を返すことがあり、それを信じると次の置換位置がずれる。
@@ -619,11 +638,91 @@ final class PrototypeInputController: IMKInputController {
                                       expectedText: target.expectedText, kind: target.kind)
     }
 
+    /// ターミナルで動く全画面のアプリ(Claude Codeなど)は、行の折り返しなどで画面を描き直し、文字の位置番号がずれる。
+    /// 応答待ちの間に打ったキーは入力先へ書かずに溜めているので、書き込んだ文字はカーソルの直前に残っているはずである。
+    /// カーソルの直前に記録した文字列があれば、そこを置換位置として記録し直す。
+    private func reanchorAtCaret(_ request: PendingRequest, in input: IMKTextInput) {
+        guard let target = pendingTarget, target.requestID == request.id, target.kind == request.kind,
+              let anchor, anchor.text == target.expectedText else { return }
+        let selection = input.selectedRange()
+        guard selection.location != NSNotFound, selection.length == 0,
+              let span = wrappedSpan(of: anchor.text, endingAt: selection.location, in: input)
+        else {
+            diag.notice("reanchor at caret: source not found before caret=\(selection.location, privacy: .public)")
+            return
+        }
+        diag.notice("reanchor at caret: moved anchor \(anchor.end, privacy: .public) -> \(selection.location, privacy: .public) span=\(span, privacy: .public)")
+        self.anchor = ReplacementAnchor(end: selection.location, text: anchor.text, span: span)
+        pendingTarget = PendingTarget(requestID: target.requestID, selection: selection,
+                                      expectedText: target.expectedText, kind: target.kind)
+    }
+
+    /// `end`の直前に`text`があれば、その文書上の長さを返す。ターミナルが折り返しで挟んだ改行と字下げも含める。
+    private func wrappedSpan(of text: String, endingAt end: Int, in input: IMKTextInput) -> Int? {
+        let length = text.utf16.count
+        // 折り返しは1行ごとに数文字増えるだけなので、原文の2倍を読めば足りる。
+        let start = max(0, end - length * 2)
+        guard end >= length,
+              let window = input.attributedSubstring(from: NSRange(location: start, length: end - start))?.string
+        else { return nil }
+        return WrappedText.suffixLength(of: text, in: window)
+    }
+
+    /// 記録した位置の文字列が一致しなかったとき、入力先が何を返したかを内容を出さずに記録する。
+    /// 返った長さ、最初に食い違う位置、その位置の文字の種類だけを出す。
+    private func reportTargetMismatch(in input: IMKTextInput) {
+        guard let anchor, anchor.end >= anchor.span else {
+            diag.notice("mismatch: no anchor")
+            return
+        }
+        let range = anchor.range
+        guard let actual = input.attributedSubstring(from: range)?.string else {
+            diag.notice("mismatch: substring unavailable range=\(range.location, privacy: .public),\(range.length, privacy: .public)")
+            return
+        }
+        let expected = Array(anchor.text.unicodeScalars)
+        let returned = Array(actual.unicodeScalars)
+        let offset = zip(expected, returned).enumerated().first { $0.element.0 != $0.element.1 }?.offset
+            ?? min(expected.count, returned.count)
+        let kind: String
+        if offset < returned.count {
+            let scalar = returned[offset]
+            kind = if CharacterSet.newlines.contains(scalar) { "newline" }
+                else if CharacterSet.whitespaces.contains(scalar) { "space" }
+                else if CharacterSet.controlCharacters.contains(scalar) { "control" }
+                else if scalar.properties.generalCategory == .privateUse { "privateUse" }
+                else if scalar.isASCII { "ascii" }
+                else { "other" }
+        } else {
+            kind = "end"
+        }
+        diag.notice("mismatch: range=\(range.location, privacy: .public),\(range.length, privacy: .public) expectedScalars=\(expected.count, privacy: .public) returnedScalars=\(returned.count, privacy: .public) firstDiff=\(offset, privacy: .public) returnedKind=\(kind, privacy: .public)")
+        reportTargetText(in: input, recorded: range, actual: actual)
+    }
+
+    /// 調査用。`defaults write dev.kiyoka.inputmethod.SumibiPrototypeProbe1 PrototypeDiagnoseText -bool true`のときだけ、
+    /// 入力先が返した文字列そのもの(入力内容と周囲の表示)を記録する。調べ終えたら`defaults delete`で戻す。
+    private func reportTargetText(in input: IMKTextInput, recorded range: NSRange, actual: String) {
+        guard UserDefaults.standard.bool(forKey: "PrototypeDiagnoseText"), let anchor else { return }
+        let visible: (String) -> String = { text in
+            text.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\n", with: "\\n")
+                .replacingOccurrences(of: "\r", with: "\\r").replacingOccurrences(of: "\t", with: "\\t")
+        }
+        let caret = input.selectedRange().location
+        let span = anchor.text.utf16.count + 40
+        let start = max(0, caret == NSNotFound ? 0 : caret - span)
+        let beforeCaret = caret == NSNotFound ? "" :
+            input.attributedSubstring(from: NSRange(location: start, length: caret - start))?.string ?? "(nil)"
+        diag.notice("text: expected=[\(visible(anchor.text), privacy: .public)]")
+        diag.notice("text: recorded \(range.location, privacy: .public)+\(range.length, privacy: .public)=[\(visible(actual), privacy: .public)]")
+        diag.notice("text: before caret \(start, privacy: .public)..<\(caret, privacy: .public)=[\(visible(beforeCaret), privacy: .public)]")
+    }
+
     private func validatesAnchor(in input: IMKTextInput, expected: String) -> Bool {
         guard let anchor,
               anchor.text == expected,
-              anchor.end >= anchor.text.utf16.count else { return false }
-        let range = NSRange(location: anchor.end - anchor.text.utf16.count, length: anchor.text.utf16.count)
+              anchor.end >= anchor.span else { return false }
+        let range = anchor.range
         // 入力先によって、置換したあとのカーソルの形が違う。メモは末尾のカーソル、Chromeは選択範囲が残る。
         // どちらも「記録した位置に記録した文字列がまだある」ことに変わりはないので、両方を認める。
         let selection = input.selectedRange()
@@ -632,7 +731,10 @@ final class PrototypeInputController: IMKInputController {
             diag.notice("anchor rejected: selection=\(selection.location, privacy: .public),\(selection.length, privacy: .public) anchor=\(range.location, privacy: .public),\(range.length, privacy: .public)")
             return false
         }
-        return input.attributedSubstring(from: range)?.string == anchor.text
+        guard let actual = input.attributedSubstring(from: range)?.string else { return false }
+        if anchor.span == anchor.text.utf16.count { return actual == anchor.text }
+        // 折り返して表示された原文は、記録した長さのまま、改行と字下げを除いて一致することを確かめる。
+        return WrappedText.suffixLength(of: anchor.text, in: actual) == anchor.span
     }
 
     /// 入力先がSumibiの対象外のアプリか。仕様書の「3.5 対象外のアプリ」を参照する。
