@@ -330,7 +330,7 @@ final class PrototypeInputController: IMKInputController {
                 } else if let a = anchor {
                     // 失敗: 原文を未確定文字列に戻し、応答中に溜めた文字を続けられるようにする。
                     let range = NSRange(location: a.end - a.text.utf16.count, length: a.text.utf16.count)
-                    input.setMarkedText(request.source, selectionRange: NSRange(location: request.source.utf16.count, length: 0),
+                    input.setMarkedText(MarkedTextStyle.attributed(request.source), selectionRange: NSRange(location: request.source.utf16.count, length: 0),
                                         replacementRange: range)
                     anchor = nil
                 }
@@ -365,7 +365,7 @@ final class PrototypeInputController: IMKInputController {
         for effect in effects {
             switch effect {
             case .marked(let text):
-                input.setMarkedText(text, selectionRange: NSRange(location: text.utf16.count, length: 0),
+                input.setMarkedText(MarkedTextStyle.attributed(text), selectionRange: NSRange(location: text.utf16.count, length: 0),
                                     replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
                 let markedStart = input.markedRange().location
                 if markedStart != NSNotFound {
