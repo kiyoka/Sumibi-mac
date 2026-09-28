@@ -79,6 +79,30 @@ final class InputSessionTests: XCTestCase {
         XCTAssertEqual(session.previous?.result, "第一")
     }
 
+    func testConvertPressedAgainWhileFetchingCandidatesStillShowsThem() {
+        let session = InputSession()
+        _ = session.receive(.text("abc"))
+        _ = session.receive(.convert)
+        _ = session.completeFirst(id: 1, result: "第一")
+        _ = session.receive(.convert, canReplacePrevious: true)
+        XCTAssertEqual(session.receive(.convert, canReplacePrevious: true), [])
+        XCTAssertEqual(session.queuedKeys, [])
+        XCTAssertEqual(session.completeAlternatives(id: 2, alternatives: ["第二"]),
+                       [.showCandidates(["第一", "第二"])])
+        XCTAssertNil(session.pending)
+    }
+
+    func testConvertAfterTextTypedWhileFetchingCandidatesIsKept() {
+        let session = InputSession()
+        _ = session.receive(.text("abc"))
+        _ = session.receive(.convert)
+        _ = session.completeFirst(id: 1, result: "第一")
+        _ = session.receive(.convert, canReplacePrevious: true)
+        _ = session.receive(.text("x"))
+        _ = session.receive(.convert)
+        XCTAssertEqual(session.queuedKeys, [.text("x"), .convert])
+    }
+
     func testLimitRejectsRequestWithoutLosingMarkedText() {
         let session = InputSession()
         _ = session.receive(.text(String(repeating: "a", count: 1_001)))

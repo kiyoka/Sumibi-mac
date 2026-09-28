@@ -48,7 +48,11 @@ public final class InputSession {
     public init() {}
 
     public func receive(_ key: InputKey, canReplacePrevious: Bool = false) -> [SessionEffect] {
-        if pending != nil {
+        if let pending {
+            // 候補の取得中に押し直された変換キーは溜めない。溜めると、候補が返った時点で取得をやり直し、
+            // 候補窓を出す前に取って代わってしまう(待ちきれずに何度か押すと、いつまでも窓が出ない)。
+            // 取得中に打った文字のあとの変換キーは、その文字の変換なので溜める。
+            if pending.kind == .alternatives, key == .convert, queuedKeys.isEmpty { return [] }
             queuedKeys.append(key)
             return []
         }
