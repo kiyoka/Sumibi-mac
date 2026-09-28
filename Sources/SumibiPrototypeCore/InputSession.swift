@@ -52,7 +52,8 @@ public final class InputSession {
             // 候補の取得中に押し直された変換キーは溜めない。溜めると、候補が返った時点で取得をやり直し、
             // 候補窓を出す前に取って代わってしまう(待ちきれずに何度か押すと、いつまでも窓が出ない)。
             // 取得中に打った文字のあとの変換キーは、その文字の変換なので溜める。
-            if pending.kind == .alternatives, key == .convert, queuedKeys.isEmpty { return [] }
+            if pending.kind == .alternatives, key == .convert,
+               queuedKeys.allSatisfy({ $0 == .convert }) { return [] }
             queuedKeys.append(key)
             return []
         }
@@ -104,6 +105,9 @@ public final class InputSession {
     public func completeAlternatives(id: Int, alternatives: [String]?) -> [SessionEffect] {
         guard let request = pending, request.id == id, request.kind == .alternatives else { return [] }
         pending = nil
+        // 初回変換の待機中に連打された変換キーは、最初の1回がこの要求を開始した時点で
+        // 役目を終えている。候補の到着後に同じ要求を繰り返さない。
+        while queuedKeys.first == .convert { queuedKeys.removeFirst() }
         if let current = previous?.result, let alternatives, !alternatives.isEmpty {
             candidateStrings = [current] + alternatives.filter { $0 != current }
         }

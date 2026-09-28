@@ -92,6 +92,23 @@ final class InputSessionTests: XCTestCase {
         XCTAssertNil(session.pending)
     }
 
+    func testConvertPressesQueuedDuringFirstRequestDoNotRepeatCandidateFetch() {
+        let session = InputSession()
+        _ = session.receive(.text("abc"))
+        _ = session.receive(.convert)
+        _ = session.receive(.convert)
+        _ = session.receive(.convert)
+        _ = session.receive(.convert)
+        XCTAssertEqual(session.completeFirst(id: 1, result: "第一"),
+                       [.commit("第一"), .startAlternatives(id: 2, source: "abc", current: "第一")])
+        XCTAssertEqual(session.receive(.convert), [])
+        XCTAssertEqual(session.queuedKeys, [.convert, .convert])
+        XCTAssertEqual(session.completeAlternatives(id: 2, alternatives: ["第二"]),
+                       [.showCandidates(["第一", "第二"])])
+        XCTAssertTrue(session.queuedKeys.isEmpty)
+        XCTAssertNil(session.pending)
+    }
+
     func testConvertAfterTextTypedWhileFetchingCandidatesIsKept() {
         let session = InputSession()
         _ = session.receive(.text("abc"))
