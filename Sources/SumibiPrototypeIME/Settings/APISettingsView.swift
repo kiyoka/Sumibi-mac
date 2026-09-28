@@ -14,8 +14,17 @@ struct APISettingsView: View {
             Section {
                 TextField("APIのURL", text: $model.endpoint, prompt: Text("例：https://api.openai.com"))
                     .focused($focusedField, equals: .endpoint)
-                TextField("モデル名", text: $model.modelName)
-                    .focused($focusedField, equals: .modelName)
+                Picker("モデル", selection: $model.modelChoice) {
+                    ForEach(ModelPreset.allCases) { preset in
+                        Text("\(preset.displayName)（\(preset.summary)）").tag(ModelChoice.preset(preset))
+                    }
+                    Text("自由入力").tag(ModelChoice.custom)
+                }
+                if model.modelChoice == .custom {
+                    TextField("モデル名", text: $model.customModelName, prompt: Text("例：gpt-6-sol"))
+                        .focused($focusedField, equals: .modelName)
+                        .accessibilityLabel("モデル名（自由入力）")
+                }
                 SecureField(model.hasStoredAPIKey ? "APIキー（保存済み）" : "APIキー", text: $model.apiKey)
                     .focused($focusedField, equals: .apiKey)
                 LabeledContent("保存済みAPIキー") {
@@ -83,10 +92,26 @@ struct APISettingsView: View {
     }
 }
 
+/// 設定画面でのモデルの選び方。代表モデルのどれか、または自由入力。
+enum ModelChoice: Hashable {
+    case preset(ModelPreset)
+    case custom
+}
+
 @Observable
 final class APISettingsModel {
     var endpoint = ProviderConfiguration.defaultEndpoint
-    var modelName = ProviderConfiguration.defaultModel
+    var modelChoice = ModelChoice.preset(.gpt6Sol)
+    /// 自由入力を選んだときのモデル名。
+    var customModelName = ""
+
+    /// 保存・送信に使うモデル名。
+    var modelName: String {
+        switch modelChoice {
+        case .preset(let preset): preset.model
+        case .custom: customModelName
+        }
+    }
     var apiKey = ""
     private(set) var storedAPIKeyDisplay: String?
     private(set) var statusMessage = ""
@@ -136,7 +161,7 @@ final class APISettingsModel {
     func reload() {
         savedConfiguration = settings.loadProviderConfiguration()
         endpoint = savedConfiguration.endpoint
-        modelName = savedConfiguration.model
+        showModel(savedConfiguration.model)
         hasConsent = settings.hasConsent(for: savedConfiguration.endpoint)
         apiKey = ""
         do {
@@ -170,7 +195,7 @@ final class APISettingsModel {
                 hasConsent = false
             }
             endpoint = normalized.endpoint
-            modelName = normalized.model
+            showModel(normalized.model)
 
             if !trimmedKey.isEmpty {
                 try keys.save(trimmedKey)
@@ -186,6 +211,17 @@ final class APISettingsModel {
             }
         } catch {
             report("設定を保存できませんでした。", isError: true)
+        }
+    }
+
+    /// 保存済みのモデル名が代表モデルならそれを選び、そうでなければ自由入力として文字列をそのまま出す。
+    private func showModel(_ model: String) {
+        if let preset = ModelPreset(model: model) {
+            modelChoice = .preset(preset)
+            customModelName = ""
+        } else {
+            modelChoice = .custom
+            customModelName = model
         }
     }
 

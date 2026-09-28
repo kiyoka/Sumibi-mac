@@ -318,7 +318,7 @@ final class PrototypeInputController: IMKInputController {
         let menu = NSMenu(title: "Sumibi Prototype")
         menu.addItem(withTitle: "Sumibi設定…", action: #selector(openSettings), keyEquivalent: "")
         menu.addItem(.separator())
-        if isExcluded(client()) {
+        if ExcludedApplications.contains((client() as? IMKTextInput)?.bundleIdentifier()) {
             let item = NSMenuItem(title: "Emacs.appではEmacs版のSumibiを使ってください", action: nil, keyEquivalent: "")
             item.isEnabled = false
             menu.addItem(item)
@@ -784,8 +784,17 @@ final class PrototypeInputController: IMKInputController {
     }
 
     /// 入力先がSumibiの対象外のアプリか。仕様書の「3.5 対象外のアプリ」を参照する。
+    ///
+    /// Sumibi自身の設定画面も対象外として扱う。入力欄はURL・モデル名・APIキーだけで、どれも英数字のため変換は要らない。
+    /// 未確定文字列のまま「設定を保存」を押すと、確定が保存に間に合わず、入力した値が空のまま保存されていた。
     private func isExcluded(_ client: Any?) -> Bool {
-        ExcludedApplications.contains((client as? IMKTextInput)?.bundleIdentifier())
+        let bundleID = (client as? IMKTextInput)?.bundleIdentifier()
+        return ExcludedApplications.contains(bundleID) || isOwnApplication(bundleID)
+    }
+
+    private func isOwnApplication(_ bundleID: String?) -> Bool {
+        guard let bundleID, let own = Bundle.main.bundleIdentifier else { return false }
+        return bundleID.caseInsensitiveCompare(own) == .orderedSame
     }
 
     /// 対象外のアプリへ移ったとき、他のアプリで進めていた入力を、別アプリへの切り替えと同じく終える。
