@@ -77,8 +77,8 @@ private final class CandidateListView: NSView {
     override var isFlipped: Bool { true }
 
     override var fittingSize: NSSize {
-        let widest = candidates.reduce(CGFloat(80)) { widest, candidate in
-            max(widest, (candidate as NSString).size(withAttributes: [.font: font]).width)
+        let widest = candidates.enumerated().reduce(CGFloat(80)) { widest, item in
+            max(widest, (label(item.element, at: item.offset) as NSString).size(withAttributes: [.font: font]).width)
         }
         return NSSize(width: ceil(widest) + horizontalPadding * 2,
                       height: CGFloat(candidates.count) * rowHeight + verticalPadding * 2)
@@ -99,7 +99,7 @@ private final class CandidateListView: NSView {
                 NSBezierPath(roundedRect: row.insetBy(dx: 3, dy: 0), xRadius: 4, yRadius: 4).fill()
                 color = .alternateSelectedControlTextColor
             }
-            let text = candidate as NSString
+            let text = label(candidate, at: index) as NSString
             let size = text.size(withAttributes: [.font: font])
             text.draw(at: NSPoint(x: row.minX + horizontalPadding,
                                   y: row.midY - size.height / 2),
@@ -113,6 +113,11 @@ private final class CandidateListView: NSView {
         selectedIndex = index
         needsDisplay = true
         onClick?(index)
+    }
+
+    /// 数字キーで選べる候補(1〜9番目)には番号を付けて表示する。
+    private func label(_ candidate: String, at index: Int) -> String {
+        index < 9 ? "\(index + 1)  \(candidate)" : "    \(candidate)"
     }
 
     private func rowRect(at index: Int) -> NSRect {

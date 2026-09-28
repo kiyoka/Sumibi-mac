@@ -174,6 +174,18 @@ final class PrototypeInputController: IMKInputController {
                 runtime.lastConsumedAt = Date()
                 return true
             default:
+                // ターミナルは未確定文字列がないとき矢印キーやEnterをIMEへ回さないので、届く変換キーと数字キーでも選べるようにする。
+                // 変換キーは次の候補へ移り、その場で書き換える。ターミナルでは決定のキーも届かないため。
+                if decoded == .convert {
+                    cycleCandidate(in: input)
+                    runtime.lastConsumedAt = Date()
+                    return true
+                }
+                if case .text(let text)? = decoded, let number = Int(text), number >= 1, number <= min(9, candidateWindow.count) {
+                    chooseCandidate(at: number - 1, in: input)
+                    runtime.lastConsumedAt = Date()
+                    return true
+                }
                 hideCandidatePanel()
             }
         }
@@ -282,6 +294,23 @@ final class PrototypeInputController: IMKInputController {
         let candidate = state.candidateStrings[index]
         let effects = state.chooseCandidate(candidate, canReplacePrevious: validatesPrevious(in: input))
         diag.notice("chooseCandidate index=\(index, privacy: .public) effects=\(effects.count, privacy: .public)")
+        _ = apply(effects, to: input)
+    }
+
+    /// 候補窓の次の候補へ移り、候補窓を開いたまま入力先の文字列をその候補に書き換える。最後の候補の次は先頭へ戻る。
+    private func cycleCandidate(in input: IMKTextInput) {
+        guard candidateWindow.count > 0 else { return }
+        let index = (candidateWindow.selectedIndex + 1) % candidateWindow.count
+        guard state.candidateStrings.indices.contains(index) else { return }
+        let effects = state.chooseCandidate(state.candidateStrings[index], canReplacePrevious: validatesPrevious(in: input),
+                                            keepCandidates: true)
+        diag.notice("cycleCandidate index=\(index, privacy: .public) effects=\(effects.count, privacy: .public)")
+        // 書き換えられなければ(照合が通らなければ)、選択位置も動かさずに候補窓を閉じる。
+        guard !effects.isEmpty else {
+            hideCandidatePanel()
+            return
+        }
+        candidateWindow.move(by: index - candidateWindow.selectedIndex)
         _ = apply(effects, to: input)
     }
 
@@ -718,7 +747,24 @@ final class PrototypeInputController: IMKInputController {
         diag.notice("text: before caret \(start, privacy: .public)..<\(caret, privacy: .public)=[\(visible(beforeCaret), privacy: .public)]")
     }
 
+    /// 記録した位置に記録した文字列があるかを確かめる。なければ、カーソルの直前にあるかを確かめて記録し直す。
+    ///
+    /// ターミナルで動く全画面のアプリ(Claude Codeなど)は、置換したあとも入力欄を描き直し、文字の位置番号がずれる。
+    /// 候補の出し直しや候補の選択のときには、記録した位置に変換結果が読めない。変換結果のあとに打った文字は
+    /// 直前の変換を取り消す(`previous`を消す)ので、変換結果が残っていればカーソルの直前にあるはずである。
+    /// 記録した文字列と違う文字列は置換しないという安全性は変わらない。
     private func validatesAnchor(in input: IMKTextInput, expected: String) -> Bool {
+        if anchorMatches(in: input, expected: expected) { return true }
+        guard let anchor, anchor.text == expected else { return false }
+        let selection = input.selectedRange()
+        guard selection.location != NSNotFound, selection.length == 0,
+              let span = wrappedSpan(of: anchor.text, endingAt: selection.location, in: input) else { return false }
+        diag.notice("anchor moved to caret: \(anchor.end, privacy: .public) -> \(selection.location, privacy: .public) span=\(span, privacy: .public)")
+        self.anchor = ReplacementAnchor(end: selection.location, text: anchor.text, span: span)
+        return true
+    }
+
+    private func anchorMatches(in input: IMKTextInput, expected: String) -> Bool {
         guard let anchor,
               anchor.text == expected,
               anchor.end >= anchor.span else { return false }
