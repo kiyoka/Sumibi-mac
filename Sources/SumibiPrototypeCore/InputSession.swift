@@ -110,13 +110,14 @@ public final class InputSession {
         return drained
     }
 
-    public func chooseCandidate(_ candidate: String, canReplacePrevious: Bool) -> [SessionEffect] {
+    /// 候補を選んで直前の変換結果を置き換える。`keepCandidates`がtrueなら候補一覧を残し、続けて別の候補を選べるようにする。
+    public func chooseCandidate(_ candidate: String, canReplacePrevious: Bool, keepCandidates: Bool = false) -> [SessionEffect] {
         guard canReplacePrevious, var current = previous,
               candidateStrings.contains(candidate), candidate != current.result else { return [] }
         let effect = SessionEffect.replacePrevious(from: current.result, to: candidate)
         current.result = candidate
         previous = current
-        candidateStrings = []
+        if !keepCandidates { candidateStrings = [] }
         return [effect]
     }
 

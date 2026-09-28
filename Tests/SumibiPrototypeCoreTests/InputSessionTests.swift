@@ -64,6 +64,21 @@ final class InputSessionTests: XCTestCase {
                        [.replacePrevious(from: "第一", to: "第二")])
     }
 
+    func testCyclingCandidatesKeepsTheList() {
+        let session = InputSession()
+        _ = session.receive(.text("abc"))
+        _ = session.receive(.convert)
+        _ = session.completeFirst(id: 1, result: "第一")
+        _ = session.receive(.convert, canReplacePrevious: true)
+        _ = session.completeAlternatives(id: 2, alternatives: ["第二", "第三"])
+        XCTAssertEqual(session.chooseCandidate("第二", canReplacePrevious: true, keepCandidates: true),
+                       [.replacePrevious(from: "第一", to: "第二")])
+        XCTAssertEqual(session.candidateStrings, ["第一", "第二", "第三"])
+        XCTAssertEqual(session.chooseCandidate("第一", canReplacePrevious: true, keepCandidates: true),
+                       [.replacePrevious(from: "第二", to: "第一")])
+        XCTAssertEqual(session.previous?.result, "第一")
+    }
+
     func testLimitRejectsRequestWithoutLosingMarkedText() {
         let session = InputSession()
         _ = session.receive(.text(String(repeating: "a", count: 1_001)))
