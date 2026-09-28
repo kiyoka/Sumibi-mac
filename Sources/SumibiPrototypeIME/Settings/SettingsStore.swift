@@ -20,6 +20,23 @@ struct SettingsStore {
         self.defaults = defaults
     }
 
+    /// 試作版(識別子`dev.kiyoka.inputmethod.SumibiPrototypeProbe1`)の設定の保存先。
+    static let prototypeDomain = "dev.kiyoka.inputmethod.SumibiPrototypeProbe1"
+
+    /// 試作版で保存した送信先・モデル・同意を、製品版の識別子の保存先へ一度だけ写す。
+    ///
+    /// 識別子を変えると`UserDefaults`の保存先も変わり、そのままでは設定をやり直すことになる。
+    /// 製品版に送信先の設定がまだないときだけ写し、試作版の設定は消さない。APIキーはKeychainにあり、識別子に依存しない。
+    func importPrototypeSettingsIfNeeded() {
+        guard defaults.data(forKey: Key.providerConfiguration) == nil,
+              let prototype = UserDefaults(suiteName: Self.prototypeDomain),
+              let data = prototype.data(forKey: Key.providerConfiguration) else { return }
+        defaults.set(data, forKey: Key.providerConfiguration)
+        for key in [Key.consentEndpoint, Key.legacyDefaultModelMigrated] {
+            if let value = prototype.object(forKey: key) { defaults.set(value, forKey: key) }
+        }
+    }
+
     func loadProviderConfiguration() -> ProviderConfiguration {
         guard let data = defaults.data(forKey: Key.providerConfiguration),
               let configuration = try? decoder.decode(ProviderConfiguration.self, from: data) else {

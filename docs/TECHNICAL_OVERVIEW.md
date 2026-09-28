@@ -456,6 +456,36 @@ InputMethodKitを使用するアプリは、通常のmacOSアプリとは起動�
 
 Mac App Storeでの配布は見送る。配布物はGitHub Releasesの署名・公証済みインストーラーとし、GitHub Pagesのダウンロードページから案内する。導入場所、ログイン項目の登録、更新・アンインストール時の扱いは、[自己配布の設計と検証項目](DIRECT_DISTRIBUTION.md)に従って具体化する。上記の手順はまだ実機で検証していない。Mac App Store方針を変更した背景は[調査記録](MAC_APP_STORE_FEASIBILITY.md)を参照する。
 
+### 10.1 製品版の識別子と表示名（Issue #11）
+
+| 項目 | 試作版 | 製品版 |
+| --- | --- | --- |
+| バンドル識別子 | `dev.kiyoka.inputmethod.SumibiPrototypeProbe1` | `org.sumibi.inputmethod.Sumibi` |
+| 入力ソースID（日本語モード） | `…SumibiPrototypeProbe1.Japanese` | `org.sumibi.inputmethod.Sumibi.Japanese` |
+| `InputMethodConnectionName` | `…SumibiPrototypeProbe1_Connection` | `org.sumibi.inputmethod.Sumibi_Connection` |
+| 表示名（日・英） | Sumibi 試作版 / Sumibi Prototype | Sumibi / Sumibi |
+| アプリ | `SumibiPrototypeIME.app` | `Sumibi.app`（実行ファイル`Sumibi`） |
+| 診断ログのsubsystem・設定の保存先 | 試作版の識別子 | 製品版の識別子 |
+
+- 識別子は頭の`org.sumibi.`をiOS版（`org.sumibi.Sumibi-iOS`）とそろえ、#4 で登録が通った`.inputmethod.`を含める。iOS版と同じ識別子にしないのは、Apple シリコンのMacへiOS版が入ったときに同じ識別子のアプリが2つになるためである。
+- 表示名はiOS版のアプリ名・キーボード名と同じ「Sumibi」とする。
+- アプリアイコンは、iOS版の線画を地の色`#CC6508`のmacOSの角丸の正方形に描いたもの（`Prototype/AppIcon.swift`、`Prototype/Resources/AppIcon.png`）。入力メニューのアイコンは、メニューバーのアイコンと同じ線画だけの型抜き画像にし、`TISIconIsTemplate`を指定する。macOSは入力メニューのアイコンを型抜きとして描くため、地の塗られた画像は豆腐のような四角になった。
+- 試作版で保存した送信先・モデル・同意は、製品版の初回起動時に一度だけ写す（`SettingsStore.importPrototypeSettingsIfNeeded`）。製品版に送信先の設定がないときだけ写し、試作版の設定は消さない。APIキーはKeychain（サービス名`org.sumibi.Sumibi-mac.api-key`）にあり、識別子に依存しない。
+
+試作版からの切り替え手順（2026-09-28、macOS 27で確認）:
+
+1. 入力ソースを`ABC`に戻す。
+2. `pkill -x SumibiPrototypeIME`で試作版を終了し、`~/Library/Input Methods/SumibiPrototypeIME.app`をゴミ箱へ移す。入力ソースの一覧から試作版はすぐに消えた。
+3. `Sumibi.app`を`~/Library/Input Methods/`へ置き、起動する。同じログインのまま、本体と日本語モードが表示名「Sumibi」で入力ソースの一覧に現れた。本体はシステム設定で追加するまで無効（`apiEnabled=false`）。
+4. システム設定の「キーボード」→「入力ソース」で「Sumibi」を追加する。項目名・副題とも「Sumibi」で現れ、追加すると本体も有効になった。変換もでき、設定は引き継がれていた。
+5. 入力メニューのアイコンは、このログインの間は最初に読み込んだ画像のまま変わらなかった。入力ソースを外して追加し直しても変わらず、ログアウト・ログインで新しい画像になった。
+
+記憶される表示名とアイコン:
+
+- #4 では、`InfoPlist.strings`を直してもそのログインの間は古い表示名が残った。今回は識別子ごと新しくしたため、表示名は初めから正しく出た。
+- 入力メニューのアイコンは、識別子ごとに最初に読み込んだ画像がログインの間は記憶される。同じ識別子のまま画像を差し替えると、反映には再ログインが要る。製品版のアイコンは確定したので、利用者に再ログインを求めるのは、配布後にアイコンを変える場合に限られる。
+- 再ログイン後、Sumibiはログイン直後に起動し、メニューバーのアイコンが出た。ログイン項目として起動したことを示す記録（`LoginItemsLauncher`）は、今回のログでは確かめていない。
+
 ## 11. 初期実装の推奨順序
 
 1. InputMethodKitで最小の入力メソッドを起動する

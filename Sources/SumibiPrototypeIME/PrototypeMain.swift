@@ -4,6 +4,7 @@ import InputMethodKit
 @main
 enum PrototypeMain {
     static func main() {
+        SettingsStore().importPrototypeSettingsIfNeeded()
         // 開発用: 入力メソッドとして動かさず、設定ウィンドウだけを開く。画面の確認に使う。
         if CommandLine.arguments.contains("--settings") {
             MainActor.assumeIsolated { SettingsWindowController.shared.show() }
