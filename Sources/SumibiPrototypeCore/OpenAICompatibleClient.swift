@@ -23,6 +23,14 @@ public struct OpenAICompatibleClient: ConversionService {
     private struct ChatRequest: Encodable {
         let model: String
         let messages: [Message]
+        /// 代表モデルにだけ付ける。自由入力のモデルには送らない(nilは要求に含めない)。
+        let reasoningEffort: String?
+        let verbosity: String?
+
+        enum CodingKeys: String, CodingKey {
+            case model, messages, verbosity
+            case reasoningEffort = "reasoning_effort"
+        }
     }
 
     private struct Message: Codable {
@@ -59,15 +67,7 @@ public struct OpenAICompatibleClient: ConversionService {
         urlRequest.timeoutInterval = configuration.timeout
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.setValue("Bearer \(configuration.apiKey)", forHTTPHeaderField: "Authorization")
-        urlRequest.httpBody = try JSONEncoder().encode(
-            ChatRequest(
-                model: configuration.model,
-                messages: [
-                    Message(role: "system", content: PromptBuilder.systemMessage(for: request)),
-                    Message(role: "user", content: PromptBuilder.userMessage(for: request)),
-                ]
-            )
-        )
+        urlRequest.httpBody = try Self.requestBody(for: request, model: configuration.model)
 
         let data: Data
         let response: URLResponse
@@ -94,6 +94,22 @@ public struct OpenAICompatibleClient: ConversionService {
         )
         guard !candidates.isEmpty else { throw ConversionError.emptyResponse }
         return ConversionResult(candidates: candidates, model: chat.model ?? configuration.model)
+    }
+
+    /// 要求の本文。代表モデルなら、モデルごとの設定(`reasoning_effort`、`verbosity`)を付ける。
+    static func requestBody(for request: ConversionRequest, model: String) throws -> Data {
+        let preset = ModelPreset(model: model)
+        return try JSONEncoder().encode(
+            ChatRequest(
+                model: model,
+                messages: [
+                    Message(role: "system", content: PromptBuilder.systemMessage(for: request)),
+                    Message(role: "user", content: PromptBuilder.userMessage(for: request)),
+                ],
+                reasoningEffort: preset?.reasoningEffort,
+                verbosity: preset?.verbosity
+            )
+        )
     }
 
     /// 利用者が入力したURLから、chat completionsの完全なURLを作る。

@@ -8,6 +8,8 @@ struct SettingsStore {
     private enum Key {
         static let providerConfiguration = "providerConfiguration"
         static let consentEndpoint = "aiDataSharingConsentEndpoint"
+        /// 以前の既定モデル(GPT-5.6 Terra)からGPT-6 Solへの移行を済ませたか。
+        static let legacyDefaultModelMigrated = "legacyDefaultModelMigrated"
     }
 
     private let defaults: UserDefaults
@@ -21,9 +23,23 @@ struct SettingsStore {
     func loadProviderConfiguration() -> ProviderConfiguration {
         guard let data = defaults.data(forKey: Key.providerConfiguration),
               let configuration = try? decoder.decode(ProviderConfiguration.self, from: data) else {
+            // 保存済みの設定がなければ、新しい既定モデルで始まる。移行の対象はない。
+            defaults.set(true, forKey: Key.legacyDefaultModelMigrated)
             return ProviderConfiguration()
         }
-        return configuration.normalized
+        return migrateLegacyDefaultModel(configuration.normalized)
+    }
+
+    /// 以前の既定モデルで保存された設定を、初回の読み込みで一度だけ新しい既定モデルへ移す。
+    private func migrateLegacyDefaultModel(_ configuration: ProviderConfiguration) -> ProviderConfiguration {
+        let alreadyMigrated = defaults.bool(forKey: Key.legacyDefaultModelMigrated)
+        let migrated = configuration.migratingLegacyDefaultModel(alreadyMigrated: alreadyMigrated)
+        if migrated != configuration {
+            // 保存できなくても、次の読み込みでまた移すだけなので、移行済みの印は保存できたときだけ付ける。
+            guard (try? saveProviderConfiguration(migrated)) != nil else { return migrated }
+        }
+        defaults.set(true, forKey: Key.legacyDefaultModelMigrated)
+        return migrated
     }
 
     func saveProviderConfiguration(_ configuration: ProviderConfiguration) throws {

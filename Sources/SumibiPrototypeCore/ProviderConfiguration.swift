@@ -6,7 +6,7 @@ import Foundation
 /// APIキーはここに含めない。キーはKeychainへ保存する。
 public struct ProviderConfiguration: Codable, Equatable, Sendable {
     public static let defaultEndpoint = "https://api.openai.com"
-    public static let defaultModel = "gpt-5.6-terra"
+    public static let defaultModel = ModelPreset.gpt6Sol.model
 
     public var endpoint: String
     public var model: String
