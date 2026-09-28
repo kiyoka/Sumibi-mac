@@ -8,7 +8,7 @@ struct ConversionCoordinator {
     private let settings = SettingsStore()
     private let keys = APIKeyStore()
 
-    /// 開発用の模擬応答。`defaults write dev.kiyoka.inputmethod.SumibiPrototypeProbe1 PrototypeResponseMode -string <mode>`で使う。
+    /// 開発用の模擬応答。`defaults write org.sumibi.inputmethod.Sumibi PrototypeResponseMode -string <mode>`で使う。
     /// api(既定・実際に通信する)、success、slow、failure、timeout。
     private static var responseMode: String {
         UserDefaults.standard.string(forKey: "PrototypeResponseMode") ?? "api"

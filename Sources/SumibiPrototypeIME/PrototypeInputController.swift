@@ -6,7 +6,7 @@ import os
 
 /// 試作の挙動を追うための診断ログ。利用者の入力内容は記録せず、文字数・キーコード・
 /// インスタンス識別子・範囲だけを出す。`log show --predicate 'subsystem == "..."'`で読む。
-private let diag = Logger(subsystem: "dev.kiyoka.inputmethod.SumibiPrototypeProbe1", category: "diag")
+private let diag = Logger(subsystem: "org.sumibi.inputmethod.Sumibi", category: "diag")
 
 private struct ReplacementAnchor {
     var end: Int
@@ -315,7 +315,7 @@ final class PrototypeInputController: IMKInputController {
     }
 
     override func menu() -> NSMenu! {
-        let menu = NSMenu(title: "Sumibi Prototype")
+        let menu = NSMenu(title: "Sumibi")
         menu.addItem(withTitle: "Sumibi設定…", action: #selector(openSettings), keyEquivalent: "")
         menu.addItem(.separator())
         if ExcludedApplications.contains((client() as? IMKTextInput)?.bundleIdentifier()) {
@@ -602,7 +602,7 @@ final class PrototypeInputController: IMKInputController {
     /// 入力先へ何も書かないため、そのままでは新しいセッションが生まれず、応答が返っても書き込む先がない。
     /// 入力先への書き込みがセッション再作成の契機になることが分かったので、明示的に空文字を書く。
     private func pokeClient(_ input: (any IMKTextInput)?) {
-        // 方式は`defaults write dev.kiyoka.inputmethod.SumibiPrototypeProbe1 PrototypePokeStyle -string <style>`で選ぶ。
+        // 方式は`defaults write org.sumibi.inputmethod.Sumibi PrototypePokeStyle -string <style>`で選ぶ。
         // marked(既定): 文書を変えない空の未確定文字列のみ。insert: 空文字の挿入のみ。both: 両方。off: 何もしない。
         let style = UserDefaults.standard.string(forKey: "PrototypePokeStyle") ?? "marked"
         guard style != "off", let input else {
@@ -729,7 +729,7 @@ final class PrototypeInputController: IMKInputController {
         reportTargetText(in: input, recorded: range, actual: actual)
     }
 
-    /// 調査用。`defaults write dev.kiyoka.inputmethod.SumibiPrototypeProbe1 PrototypeDiagnoseText -bool true`のときだけ、
+    /// 調査用。`defaults write org.sumibi.inputmethod.Sumibi PrototypeDiagnoseText -bool true`のときだけ、
     /// 入力先が返した文字列そのもの(入力内容と周囲の表示)を記録する。調べ終えたら`defaults delete`で戻す。
     private func reportTargetText(in input: IMKTextInput, recorded range: NSRange, actual: String) {
         guard UserDefaults.standard.bool(forKey: "PrototypeDiagnoseText"), let anchor else { return }

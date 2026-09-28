@@ -2,11 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>CFBundleDevelopmentRegion</key><string>ja</string>
-  <key>CFBundleExecutable</key><string>SumibiPrototypeIME</string>
-  <key>CFBundleIdentifier</key><string>dev.kiyoka.inputmethod.SumibiPrototypeProbe1</string>
+  <key>CFBundleExecutable</key><string>Sumibi</string>
+  <key>CFBundleIdentifier</key><string>org.sumibi.inputmethod.Sumibi</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-  <key>CFBundleName</key><string>Sumibi Prototype</string>
-  <key>CFBundleIconFile</key><string>PrototypeIcon.icns</string>
+  <key>CFBundleName</key><string>Sumibi</string>
+  <key>CFBundleIconFile</key><string>AppIcon.icns</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleSupportedPlatforms</key><array><string>MacOSX</string></array>
   <key>CFBundleShortVersionString</key><string>0.4</string>
@@ -15,25 +15,26 @@
   <key>LSUIElement</key><true/>
   <key>LSMinimumSystemVersion</key><string>26.0</string>
   <key>NSPrincipalClass</key><string>NSApplication</string>
-  <key>InputMethodConnectionName</key><string>dev.kiyoka.inputmethod.SumibiPrototypeProbe1_Connection</string>
+  <key>InputMethodConnectionName</key><string>org.sumibi.inputmethod.Sumibi_Connection</string>
   <key>InputMethodServerControllerClass</key><string>SumibiPrototypeInputController</string>
   <key>TISIntendedLanguage</key><string>ja</string>
   <key>tsInputMethodCharacterRepertoireKey</key><array><string>Latn</string><string>Hira</string><string>Kana</string></array>
-  <key>tsInputMethodIconFileKey</key><string>PrototypeIcon.tiff</string>
+  <key>TISIconIsTemplate</key><true/>
+  <key>tsInputMethodIconFileKey</key><string>InputMenuIcon.tiff</string>
   <key>ComponentInputModeDict</key>
   <dict>
     <key>tsInputModeListKey</key>
     <dict>
       <key>com.apple.inputmethod.Japanese</key>
       <dict>
-        <key>TISInputSourceID</key><string>dev.kiyoka.inputmethod.SumibiPrototypeProbe1.Japanese</string>
+        <key>TISInputSourceID</key><string>org.sumibi.inputmethod.Sumibi.Japanese</string>
         <key>TISIntendedLanguage</key><string>ja</string>
         <key>tsInputModeIsVisibleKey</key><true/>
         <key>tsInputModeDefaultStateKey</key><true/>
         <key>tsInputModePrimaryInScriptKey</key><true/>
         <key>tsInputModeScriptKey</key><string>smJapanese</string>
-        <key>tsInputModeMenuIconFileKey</key><string>PrototypeIcon.tiff</string>
-        <key>tsInputModePaletteIconFileKey</key><string>PrototypeIcon.tiff</string>
+        <key>tsInputModeMenuIconFileKey</key><string>InputMenuIcon.tiff</string>
+        <key>tsInputModePaletteIconFileKey</key><string>InputMenuIcon.tiff</string>
       </dict>
     </dict>
     <key>tsVisibleInputModeOrderedArrayKey</key>

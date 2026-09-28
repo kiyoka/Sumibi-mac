@@ -1,7 +1,7 @@
 import Carbon
 import Foundation
 
-let expectedBundleID = "dev.kiyoka.inputmethod.SumibiPrototypeProbe1"
+let expectedBundleID = "org.sumibi.inputmethod.Sumibi"
 let installedSources = TISCreateInputSourceList(nil, true).takeRetainedValue() as NSArray
 let enabledSources = TISCreateInputSourceList(nil, false).takeRetainedValue() as NSArray
 

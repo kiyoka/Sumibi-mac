@@ -2,7 +2,7 @@ import AppKit
 import ServiceManagement
 import os
 
-private let log = Logger(subsystem: "dev.kiyoka.inputmethod.SumibiPrototypeProbe1", category: "menubar")
+private let log = Logger(subsystem: "org.sumibi.inputmethod.Sumibi", category: "menubar")
 
 /// メニューバーに常時表示するSumibiアイコンと、その下に出すメニュー。
 ///
