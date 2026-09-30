@@ -26,7 +26,7 @@ private struct ReplacementAnchor {
 /// 変換要求の結果。入力先へ書き込めるようになるまで保持する。
 private enum PendingOutcome {
     case first(String)
-    case alternatives([String])
+    case alternatives(ConversionResult)
     case failure(ConversionError)
 }
 
@@ -62,6 +62,8 @@ final class PrototypeRuntime {
     fileprivate var panelTopLeft: NSPoint?
     /// 候補窓を出しているべきか。セッション終了で隠れた場合に出し直す判断に使う。
     fileprivate var panelShouldBeVisible = false
+    /// 現在の候補窓で、ローカル辞書から追加された表記。
+    fileprivate var dictionaryCandidates: Set<String> = []
     /// 応答が返った時刻。返るまでは nil。
     fileprivate var pendingReadyAt: Date?
     /// 返ってきた応答。入力先へ書き込める状態になるまで持っておく。
@@ -360,7 +362,7 @@ final class PrototypeInputController: IMKInputController {
         let kind: (ConversionResult) -> PendingOutcome = { result in
             switch request.mode {
             case .first: .first(result.candidates.first ?? "")
-            case .alternatives: .alternatives(result.candidates)
+            case .alternatives: .alternatives(result)
             }
         }
         runtime.conversionTask = Task { [runtime] in
@@ -436,6 +438,7 @@ final class PrototypeInputController: IMKInputController {
         let effects: [SessionEffect]
         switch request.kind {
         case .first:
+            runtime.dictionaryCandidates = []
             let result: String? = if case .first(let text) = outcome, !text.isEmpty { text } else { nil }
             var firstEffects = state.completeFirst(id: request.id, result: result)
             if runtime.originalCommitted {
@@ -455,7 +458,25 @@ final class PrototypeInputController: IMKInputController {
             }
             effects = firstEffects
         case .alternatives:
-            let alternatives: [String]? = if case .alternatives(let list) = outcome { list } else { nil }
+            let alternatives: [String]?
+            if case .alternatives(let result) = outcome {
+                alternatives = result.candidates
+                // 現在の確定結果は前回選んだ出所を維持する。今回の応答で同じ表記が
+                // 別の出所から返っても、先頭に表示するのは既存の確定結果である。
+                let current = state.previous?.result
+                let currentWasDictionary = current.map(runtime.dictionaryCandidates.contains) ?? false
+                runtime.dictionaryCandidates = result.dictionaryCandidates
+                if let current {
+                    if currentWasDictionary {
+                        runtime.dictionaryCandidates.insert(current)
+                    } else {
+                        runtime.dictionaryCandidates.remove(current)
+                    }
+                }
+            } else {
+                alternatives = nil
+                runtime.dictionaryCandidates = []
+            }
             effects = state.completeAlternatives(id: request.id, alternatives: alternatives)
         case .selection:
             let result: String? = if case .first(let text) = outcome, !text.isEmpty { text } else { nil }
@@ -552,7 +573,9 @@ final class PrototypeInputController: IMKInputController {
                 let anchorRect = lineRectNearCaret(in: input) ?? runtime.lastLineRect
                 let topLeft = anchorRect.map { NSPoint(x: $0.minX, y: $0.minY) } ?? NSEvent.mouseLocation
                 candidateWindow.onSelect = { [weak self] index in self?.chooseCandidate(at: index, in: nil) }
-                candidateWindow.show(candidates: state.candidateStrings, selected: 0, topLeft: topLeft)
+                candidateWindow.show(candidates: state.candidateStrings,
+                                     dictionaryCandidates: runtime.dictionaryCandidates,
+                                     selected: 0, topLeft: topLeft)
                 runtime.panelShouldBeVisible = true
                 runtime.panelTopLeft = topLeft
                 diag.notice("showCandidates count=\(self.state.candidateStrings.count, privacy: .public) visible=\(self.candidateWindow.isVisible, privacy: .public) anchor=\(anchorRect.map { NSStringFromRect($0) } ?? "none", privacy: .public) topLeft=\(NSStringFromPoint(topLeft), privacy: .public)")

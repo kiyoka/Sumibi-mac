@@ -37,10 +37,13 @@ public struct ConversionRequest: Equatable, Sendable {
 public struct ConversionResult: Equatable, Sendable {
     public let candidates: [String]
     public let model: String?
+    /// ローカル辞書から追加された候補。LLM候補と重複する表記は含めない。
+    public let dictionaryCandidates: Set<String>
 
-    public init(candidates: [String], model: String? = nil) {
+    public init(candidates: [String], model: String? = nil, dictionaryCandidates: Set<String> = []) {
         self.candidates = candidates
         self.model = model
+        self.dictionaryCandidates = dictionaryCandidates
     }
 }
 

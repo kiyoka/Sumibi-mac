@@ -31,8 +31,9 @@ final class CandidateWindow {
         list.onClick = { [weak self] index in self?.onSelect?(index) }
     }
 
-    func show(candidates: [String], selected: Int, topLeft: NSPoint) {
+    func show(candidates: [String], dictionaryCandidates: Set<String>, selected: Int, topLeft: NSPoint) {
         list.candidates = candidates
+        list.dictionaryCandidates = dictionaryCandidates
         list.selectedIndex = max(0, min(candidates.count - 1, selected))
         let size = list.fittingSize
         var origin = NSPoint(x: topLeft.x, y: topLeft.y - size.height)
@@ -66,6 +67,7 @@ final class CandidateWindow {
 
 private final class CandidateListView: NSView {
     var candidates: [String] = []
+    var dictionaryCandidates: Set<String> = []
     var selectedIndex = 0
     var onClick: ((Int) -> Void)?
 
@@ -73,6 +75,8 @@ private final class CandidateListView: NSView {
     private let horizontalPadding: CGFloat = 10
     private let verticalPadding: CGFloat = 6
     private let font = NSFont.systemFont(ofSize: 14)
+    private let annotationFont = NSFont.systemFont(ofSize: 11)
+    private let annotationGap: CGFloat = 16
 
     override var isFlipped: Bool { true }
 
@@ -80,7 +84,9 @@ private final class CandidateListView: NSView {
         let widest = candidates.enumerated().reduce(CGFloat(80)) { widest, item in
             max(widest, (label(item.element, at: item.offset) as NSString).size(withAttributes: [.font: font]).width)
         }
-        return NSSize(width: ceil(widest) + horizontalPadding * 2,
+        let annotationWidth = max(("LLM" as NSString).size(withAttributes: [.font: annotationFont]).width,
+                                  ("辞書" as NSString).size(withAttributes: [.font: annotationFont]).width)
+        return NSSize(width: ceil(widest + annotationGap + annotationWidth) + horizontalPadding * 2,
                       height: CGFloat(candidates.count) * rowHeight + verticalPadding * 2)
     }
 
@@ -104,6 +110,12 @@ private final class CandidateListView: NSView {
             text.draw(at: NSPoint(x: row.minX + horizontalPadding,
                                   y: row.midY - size.height / 2),
                       withAttributes: [.font: font, .foregroundColor: color])
+            let annotation = (dictionaryCandidates.contains(candidate) ? "辞書" : "LLM") as NSString
+            let annotationSize = annotation.size(withAttributes: [.font: annotationFont])
+            let annotationColor = index == selectedIndex ? color : NSColor.secondaryLabelColor
+            annotation.draw(at: NSPoint(x: row.maxX - horizontalPadding - annotationSize.width,
+                                        y: row.midY - annotationSize.height / 2),
+                            withAttributes: [.font: annotationFont, .foregroundColor: annotationColor])
         }
     }
 
