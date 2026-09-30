@@ -306,7 +306,9 @@ BYOKの設定とデフォルトOFFの文脈利用設定をmacOS版の仕様に�
 
 このため、メニューバーの表示と設定画面の起動は、IMEの入力セッションの有効・無効に依存しない構成にする。構成は下の「実装済みの部分（メニューバー常駐）」を参照する。
 
-アイコン素材はiOS版の`SumibiApp/Assets.xcassets/AppIcon.appiconset/AppIcon.png`をベースにする。形状・モチーフを保ち、少し濃い色に調整したmacOS版の素材をSumibi-mac側で独立して管理する。これは画像素材の流用であり、コードや共通パッケージの共有ではない。iOS版の元画像は変更しない。具体的な色味は両版の比較プレビューで決め、メニューバー用の小さい表示でも明暗の背景に対して見やすいことを確認する。
+アイコン素材はiOS版の`SumibiApp/Assets.xcassets/AppIcon.appiconset/AppIcon.png`をベースにする。形状・モチーフと地の色`#FA8F12`を揃えたmacOS版の素材をSumibi-mac側で独立して管理する。macOS用の角丸・余白・影は維持する。これは画像素材の流用であり、コードや共通パッケージの共有ではない。iOS版の元画像は変更しない。メニューバー用の小さい表示でも明暗の背景に対して見やすいことを確認する。
+
+アプリアイコンの再生成は、Sumibi-macのルートで`swift Prototype/AppIcon.swift <iOS版のAppIcon.pngへのパス> FA8F12 Prototype/Resources/AppIcon.png`を実行する。生成後のPNGをリポジトリへ保存し、`Prototype/build.sh`で`.icns`へ変換してアプリへ組み込む。
 
 保存先の基本方針：
 
@@ -484,7 +486,7 @@ Mac App Storeでの配布は見送る。配布物はGitHub Releasesの署名・�
 
 - 識別子は頭の`org.sumibi.`をiOS版（`org.sumibi.Sumibi-iOS`）とそろえ、#4 で登録が通った`.inputmethod.`を含める。iOS版と同じ識別子にしないのは、Apple シリコンのMacへiOS版が入ったときに同じ識別子のアプリが2つになるためである。
 - 表示名はiOS版のアプリ名・キーボード名と同じ「Sumibi」とする。
-- アプリアイコンは、iOS版の線画を地の色`#CC6508`のmacOSの角丸の正方形に描いたもの（`Prototype/AppIcon.swift`、`Prototype/Resources/AppIcon.png`）。入力メニューのアイコンは、メニューバーのアイコンと同じ線画だけの型抜き画像にし、`TISIconIsTemplate`を指定する。macOSは入力メニューのアイコンを型抜きとして描くため、地の塗られた画像は豆腐のような四角になった。
+- アプリアイコンは、iOS版の線画をiOS版と同じ地の色`#FA8F12`のmacOSの角丸の正方形に描いたもの（`Prototype/AppIcon.swift`、`Prototype/Resources/AppIcon.png`）。2026-09-28の初期版では`#CC6508`を使っていたが、Issue #38でiOS版と同じ色へ変更した。入力メニューのアイコンは、メニューバーのアイコンと同じ線画だけの型抜き画像にし、`TISIconIsTemplate`を指定する。macOSは入力メニューのアイコンを型抜きとして描くため、地の塗られた画像は豆腐のような四角になった。
 - 試作版で保存した送信先・モデル・同意は、製品版の初回起動時に一度だけ写す（`SettingsStore.importPrototypeSettingsIfNeeded`）。製品版に送信先の設定がないときだけ写し、試作版の設定は消さない。APIキーはKeychain（サービス名`org.sumibi.Sumibi-mac.api-key`）にあり、識別子に依存しない。
 
 試作版からの切り替え手順（2026-09-28、macOS 27で確認）:
