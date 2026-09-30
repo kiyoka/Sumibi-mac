@@ -8,6 +8,11 @@ struct ConversionCoordinator {
     private let settings = SettingsStore()
     private let keys = APIKeyStore()
 
+    private static let homophoneDictionary: HomophoneDictionary? = {
+        guard let url = Bundle.main.url(forResource: "SudachiCandidates", withExtension: "tsv") else { return nil }
+        return try? HomophoneDictionary(contentsOf: url)
+    }()
+
     /// 開発用の模擬応答。`defaults write org.sumibi.inputmethod.Sumibi PrototypeResponseMode -string <mode>`で使う。
     /// api(既定・実際に通信する)、success、slow、failure、timeout。
     private static var responseMode: String {
@@ -46,7 +51,16 @@ struct ConversionCoordinator {
 
     func convert(_ request: ConversionRequest) async -> Result<ConversionResult, ConversionError> {
         do {
-            return .success(try await service().convert(request))
+            let result = try await service().convert(request)
+            guard request.mode == .alternatives, let dictionary = Self.homophoneDictionary else {
+                return .success(result)
+            }
+            let combined = dictionary.supplement(result.candidates)
+            return .success(ConversionResult(
+                candidates: combined,
+                model: result.model,
+                dictionaryCandidates: Set(combined.dropFirst(result.candidates.count))
+            ))
         } catch let error as ConversionError {
             return .failure(error)
         } catch {
