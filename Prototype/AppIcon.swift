@@ -1,6 +1,6 @@
 import AppKit
 
-// iOS版のアイコン(橙地に黒の線画)から線画を取り出し、iOS版より少し濃い橙の地に描いたmacOS用のアイコンを作る。
+// iOS版のアイコン(橙地に黒の線画)から線画を取り出し、同じ橙の地に描いたmacOS用のアイコンを作る。
 // 形はmacOSのアプリアイコンの格子(1024pxの中に824pxの角丸の正方形)に合わせる。
 // 生成した画像はSumibi-mac側で管理し、iOS版の元画像は変更しない。
 // 使い方: swift Prototype/AppIcon.swift <iOS版AppIcon.png> <地の色 RRGGBB> <出力PNG>
