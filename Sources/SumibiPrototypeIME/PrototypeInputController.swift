@@ -145,6 +145,26 @@ final class PrototypeInputController: IMKInputController {
     /// 解釈したキーを処理する。右Commandのタップは、キーコードなしの`Control + J`としてここへ来る。
     private func process(_ decoded: InputKey?, keyCode: UInt16?, in input: IMKTextInput) -> Bool {
         runtime.lastInput = input
+        // 返っている応答を反映する前にEscを処理する。取消と結果の確定が競合しないようにする。
+        if decoded == .cancel {
+            if runtime.panelShouldBeVisible {
+                hideCandidatePanel()
+                runtime.lastConsumedAt = Date()
+                return true
+            }
+            guard !state.marked.isEmpty || state.pending != nil else { return false }
+            let effects = state.cancelComposition(originalCommitted: runtime.originalCommitted)
+            clearPendingRuntime()
+            anchor = nil
+            pendingTarget = nil
+            runtime.selectionRange = nil
+            runtime.originalCommitted = false
+            runtime.dictionaryCandidates = []
+            _ = apply(effects, to: input)
+            runtime.lastConsumedAt = Date()
+            diag.notice("composition cancelled with Esc effects=\(effects.count, privacy: .public)")
+            return true
+        }
         // 応答は返っているのに、セッション終了で入力先へ書き込めなかった場合は、生きた入力先が確実にあるこの時点で完了させる。
         if let request = state.pending, let readyAt = runtime.pendingReadyAt, Date() >= readyAt {
             diag.notice("completing pending request on key event id=\(self.diagID, privacy: .public) request=\(request.id, privacy: .public)")
@@ -171,10 +191,6 @@ final class PrototypeInputController: IMKInputController {
                 return true
             case 36?, 76?:
                 chooseCandidate(at: candidateWindow.selectedIndex, in: input)
-                runtime.lastConsumedAt = Date()
-                return true
-            case 53?:
-                hideCandidatePanel()
                 runtime.lastConsumedAt = Date()
                 return true
             default:
@@ -493,6 +509,9 @@ final class PrototypeInputController: IMKInputController {
 
     private func decode(_ event: NSEvent) -> InputKey? {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if event.keyCode == 53, modifiers.intersection([.shift, .command, .control, .option, .function]).isEmpty {
+            return .cancel
+        }
         // 「かな」キーも変換キーとして扱う。JISキーボードのかなキーのほか、Kanaryなどが右Commandのタップをかなキーに変えて送ってくる。
         if event.keyCode == Self.kanaKeyCode { return .convert }
         if modifiers.contains(.control), event.charactersIgnoringModifiers?.lowercased() == "j" {
@@ -533,6 +552,8 @@ final class PrototypeInputController: IMKInputController {
                 if deferred { deferredControls.append("Backspace") } else { passToClient = true }
             case .passConvert(let deferred):
                 if deferred { deferredControls.append("Control-J") } else { passToClient = true }
+            case .passCancel:
+                passToClient = true
             case .startFirst(let id, let source):
                 // 原文をいったん通常の文字として確定し、応答が来たらその範囲を置換する。
                 // 未確定のままだと原文が入力先のUndo履歴に入らず、Undoで原文へ戻せない。
@@ -836,7 +857,7 @@ final class PrototypeInputController: IMKInputController {
         cancelForTargetChange()
     }
 
-    private func cancelForTargetChange(rescueMarked: Bool = true) {
+    private func clearPendingRuntime() {
         runtime.finishTimer?.cancel()
         runtime.finishTimer = nil
         runtime.conversionTask?.cancel()
@@ -844,6 +865,10 @@ final class PrototypeInputController: IMKInputController {
         runtime.pendingOutcome = nil
         runtime.pendingReadyAt = nil
         hideCandidatePanel()
+    }
+
+    private func cancelForTargetChange(rescueMarked: Bool = true) {
+        clearPendingRuntime()
         // 原文を確定済みなら、すでに入力先にあるので保留文字として救済しない。
         let effects = state.cancelForTargetChange(rescueMarked: rescueMarked && !runtime.originalCommitted)
         runtime.originalCommitted = false

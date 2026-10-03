@@ -5,6 +5,7 @@ public enum InputKey: Equatable {
     case enter
     case backspace
     case convert
+    case cancel
 }
 
 public enum SessionEffect: Equatable {
@@ -13,6 +14,7 @@ public enum SessionEffect: Equatable {
     case passEnter(deferred: Bool)
     case passBackspace(deferred: Bool)
     case passConvert(deferred: Bool)
+    case passCancel
     case startFirst(id: Int, source: String)
     case startAlternatives(id: Int, source: String, current: String)
     /// 入力先で選択されている文字列を、そのまま変換対象にする。
@@ -48,6 +50,8 @@ public final class InputSession {
     public init() {}
 
     public func receive(_ key: InputKey, canReplacePrevious: Bool = false) -> [SessionEffect] {
+        // Escは待ち行列へ入れず、その場で取り消す。IMEアダプターは確定済み原文の有無も渡す。
+        if key == .cancel { return cancelComposition() }
         if let pending {
             // 候補の取得中に押し直された変換キーは溜めない。溜めると、候補が返った時点で取得をやり直し、
             // 候補窓を出す前に取って代わってしまう(待ちきれずに何度か押すと、いつまでも窓が出ない)。
@@ -144,8 +148,29 @@ public final class InputSession {
         return rescued.isEmpty ? [] : [.rescueText(rescued)]
     }
 
+    /// 原文を残して追跡を解除する。待機入力は保留し、制御キーを実行しない。
+    public func cancelComposition(originalCommitted: Bool = false) -> [SessionEffect] {
+        guard !marked.isEmpty || pending != nil else { return [.passCancel] }
+        let original = originalCommitted ? "" : marked
+        let rescued = queuedKeys.compactMap { key -> String? in
+            if case .text(let text) = key { return text }
+            return nil
+        }.joined()
+        marked = ""
+        pending = nil
+        previous = nil
+        candidateStrings = []
+        queuedKeys = []
+        var effects: [SessionEffect] = []
+        if !original.isEmpty { effects.append(.commit(original)) }
+        if !rescued.isEmpty { effects.append(.rescueText(rescued)) }
+        return effects
+    }
+
     private func apply(_ key: InputKey, deferred: Bool, canReplacePrevious: Bool) -> [SessionEffect] {
         switch key {
+        case .cancel:
+            return cancelComposition()
         case .text(let text):
             guard !text.isEmpty else { return [] }
             previous = nil
