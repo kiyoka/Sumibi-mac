@@ -51,6 +51,7 @@ struct ConversionCoordinator {
 
     func convert(_ request: ConversionRequest) async -> Result<ConversionResult, ConversionError> {
         do {
+            try ConversionLimit.check(request)
             let result = try await service().convert(request)
             guard request.mode == .alternatives, let dictionary = Self.homophoneDictionary else {
                 return .success(result)

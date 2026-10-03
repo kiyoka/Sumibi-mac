@@ -8,6 +8,7 @@ struct SettingsStore {
     private enum Key {
         static let providerConfiguration = "providerConfiguration"
         static let consentEndpoint = "aiDataSharingConsentEndpoint"
+        static let userDictionary = "userDictionary"
         /// 以前の既定モデル(GPT-5.6 Terra)からGPT-6 Solへの移行を済ませたか。
         static let legacyDefaultModelMigrated = "legacyDefaultModelMigrated"
     }
@@ -76,5 +77,13 @@ struct SettingsStore {
 
     func revokeConsent() {
         defaults.removeObject(forKey: Key.consentEndpoint)
+    }
+
+    func loadUserDictionary() -> String {
+        defaults.string(forKey: Key.userDictionary) ?? ""
+    }
+
+    func saveUserDictionary(_ dictionary: String) {
+        defaults.set(dictionary, forKey: Key.userDictionary)
     }
 }
