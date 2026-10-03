@@ -62,6 +62,8 @@ final class PrototypeRuntime {
     fileprivate var panelTopLeft: NSPoint?
     /// 候補窓を出しているべきか。セッション終了で隠れた場合に出し直す判断に使う。
     fileprivate var panelShouldBeVisible = false
+    /// 自分の設定画面でも、ユーザー辞書の編集シート内だけは変換を許可する。
+    var isEditingUserDictionary = false
     /// 現在の候補窓で、ローカル辞書から追加された表記。
     fileprivate var dictionaryCandidates: Set<String> = []
     /// 応答が返った時刻。返るまでは nil。
@@ -355,6 +357,9 @@ final class PrototypeInputController: IMKInputController {
 
     /// 変換を要求し、結果が返ったら入力先へ届ける。
     private func startConversion(id: Int, request: ConversionRequest) {
+        let request = ConversionRequest(source: request.source, mode: request.mode,
+                                        currentConversion: request.currentConversion,
+                                        userDictionary: SettingsStore().loadUserDictionary())
         runtime.finishRetries = 0
         runtime.pendingReadyAt = nil
         runtime.pendingOutcome = nil
@@ -808,11 +813,13 @@ final class PrototypeInputController: IMKInputController {
 
     /// 入力先がSumibiの対象外のアプリか。仕様書の「3.5 対象外のアプリ」を参照する。
     ///
-    /// Sumibi自身の設定画面も対象外として扱う。入力欄はURL・モデル名・APIキーだけで、どれも英数字のため変換は要らない。
-    /// 未確定文字列のまま「設定を保存」を押すと、確定が保存に間に合わず、入力した値が空のまま保存されていた。
+    /// Sumibi自身のAPI設定欄は対象外とする。未確定文字列のまま「設定を保存」を押すと、
+    /// 確定が保存に間に合わず、入力値が空のまま保存されるため。
+    /// ユーザー辞書の編集シートだけは日本語変換が必要なので、開いている間は許可する。
     private func isExcluded(_ client: Any?) -> Bool {
         let bundleID = (client as? IMKTextInput)?.bundleIdentifier()
-        return ExcludedApplications.contains(bundleID) || isOwnApplication(bundleID)
+        return ExcludedApplications.contains(bundleID)
+            || (isOwnApplication(bundleID) && !runtime.isEditingUserDictionary)
     }
 
     private func isOwnApplication(_ bundleID: String?) -> Bool {

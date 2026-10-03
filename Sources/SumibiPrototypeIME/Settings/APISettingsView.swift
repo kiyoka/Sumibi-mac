@@ -4,6 +4,8 @@ import SumibiPrototypeCore
 /// API設定の画面。項目名と流れはSumibi-iOSの「API設定」に合わせる。
 struct APISettingsView: View {
     @State private var model = APISettingsModel()
+    @State private var userDictionary = ""
+    @State private var isShowingUserDictionary = false
     @State private var isShowingDeletionConfirmation = false
     @FocusState private var focusedField: Field?
 
@@ -46,7 +48,7 @@ struct APISettingsView: View {
                     get: { model.hasConsent },
                     set: { model.setConsent($0) }
                 ))
-                Text("同意すると、変換のたびに変換対象の文字列が上記の送信先へ送られます。送信先での扱いは、利用者が選んだAPIプロバイダーの規約に従います。プロバイダーの料金が発生します。送信先を変えた場合は、改めて同意が必要です。同意はいつでも取り消せます。")
+                Text("同意すると、変換のたびに変換対象の文字列と登録したユーザー辞書が上記の送信先へ送られます。送信先での扱いは、利用者が選んだAPIプロバイダーの規約に従います。プロバイダーの料金が発生します。送信先を変えた場合は、改めて同意が必要です。同意はいつでも取り消せます。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 Text("変換キーを押したときだけ送信します。キー入力や原文をログへ保存しません。周辺文脈は送信しません。")
@@ -54,6 +56,24 @@ struct APISettingsView: View {
                     .foregroundStyle(.secondary)
             } header: {
                 Text("送信先と料金")
+            }
+
+            Section {
+                Button {
+                    isShowingUserDictionary = true
+                } label: {
+                    HStack {
+                        Label("ユーザー辞書", systemImage: "character.book.closed")
+                        Spacer()
+                        Text(dictionarySummary)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+            } footer: {
+                Text("登録内容はすべての変換リクエストへ送信されます。変換対象などとの合計が1,000文字を超える要求は送信せず、エラーにします。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
 
             Section {
@@ -80,7 +100,15 @@ struct APISettingsView: View {
         }
         .formStyle(.grouped)
         .frame(minWidth: 460, minHeight: 440)
-        .onAppear { model.reload() }
+        .onAppear {
+            model.reload()
+            userDictionary = SettingsStore().loadUserDictionary()
+        }
+        .sheet(isPresented: $isShowingUserDictionary) {
+            UserDictionaryEditor(initialText: userDictionary) { saved in
+                userDictionary = saved
+            }
+        }
         .confirmationDialog("保存したAPIキーを削除しますか？",
                             isPresented: $isShowingDeletionConfirmation,
                             titleVisibility: .visible) {
@@ -89,6 +117,11 @@ struct APISettingsView: View {
         } message: {
             Text("削除すると元に戻せません。再度使うにはAPIキーの入力が必要です。")
         }
+    }
+
+    private var dictionarySummary: String {
+        let count = UserDictionary.validate(userDictionary).entries.count
+        return count == 0 ? "未設定" : "\(count)件"
     }
 }
 
