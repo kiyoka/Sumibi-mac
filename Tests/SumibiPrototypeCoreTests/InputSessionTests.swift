@@ -2,6 +2,66 @@ import XCTest
 @testable import SumibiPrototypeCore
 
 final class InputSessionTests: XCTestCase {
+    func testEscapeCommitsOriginalWithoutEnterAndStartsFreshTracking() {
+        let session = InputSession()
+        _ = session.receive(.text("abc"))
+        XCTAssertEqual(session.receive(.cancel), [.commit("abc")])
+        XCTAssertTrue(session.marked.isEmpty)
+        XCTAssertNil(session.previous)
+        XCTAssertEqual(session.receive(.text("def")), [.marked("def")])
+        XCTAssertEqual(session.receive(.convert), [.startFirst(id: 1, source: "def")])
+    }
+
+    func testEscapeWithoutTargetPassesThrough() {
+        XCTAssertEqual(InputSession().receive(.cancel), [.passCancel])
+    }
+
+    func testEscapeCancelsRequestAndRescuesQueuedTextWithoutExecutingControls() {
+        let session = InputSession()
+        _ = session.receive(.text("abc"))
+        _ = session.receive(.convert)
+        _ = session.receive(.text("xyz"))
+        _ = session.receive(.enter)
+        _ = session.receive(.backspace)
+        _ = session.receive(.convert)
+        XCTAssertEqual(session.cancelComposition(originalCommitted: true), [.rescueText("xyz")])
+        XCTAssertNil(session.pending)
+        XCTAssertTrue(session.marked.isEmpty)
+        XCTAssertTrue(session.queuedKeys.isEmpty)
+        XCTAssertEqual(session.completeFirst(id: 1, result: "遅延結果"), [])
+        _ = session.receive(.text("new"))
+        XCTAssertEqual(session.receive(.convert), [.startFirst(id: 2, source: "new")])
+        XCTAssertEqual(session.completeFirst(id: 1, result: "遅延結果"), [])
+        XCTAssertEqual(session.pending?.id, 2)
+    }
+
+    func testEscapeBeforeOriginalCommitKeepsOriginal() {
+        let session = InputSession()
+        _ = session.receive(.text("abc"))
+        _ = session.receive(.convert)
+        XCTAssertEqual(session.receive(.cancel), [.commit("abc")])
+        XCTAssertEqual(session.completeFirst(id: 1, result: "遅延結果"), [])
+    }
+
+    func testEscapeCancelsSelectionRequestWithoutWritingSelectionAgain() {
+        let session = InputSession()
+        _ = session.convertSelection("abc")
+        XCTAssertEqual(session.cancelComposition(originalCommitted: true), [])
+        XCTAssertEqual(session.completeSelection(id: 1, result: "遅延結果"), [])
+    }
+
+    func testEscapeCancelsAlternativesAndLeavesCommittedResultAlone() {
+        let session = InputSession()
+        _ = session.receive(.text("abc"))
+        _ = session.receive(.convert)
+        _ = session.completeFirst(id: 1, result: "第一")
+        _ = session.receive(.convert, canReplacePrevious: true)
+        XCTAssertEqual(session.receive(.cancel), [])
+        XCTAssertNil(session.previous)
+        XCTAssertEqual(session.completeAlternatives(id: 2, alternatives: ["第二"]), [])
+        XCTAssertTrue(session.candidateStrings.isEmpty)
+    }
+
     func testFirstResultCommitsBeforeQueuedText() {
         let session = InputSession()
         XCTAssertEqual(session.receive(.text("ohayou")), [.marked("ohayou")])
