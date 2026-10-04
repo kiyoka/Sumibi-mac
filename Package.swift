@@ -16,6 +16,11 @@ let package = Package(
             swiftSettings: [.swiftLanguageMode(.v5)],
             linkerSettings: [.linkedFramework("AppKit"), .linkedFramework("InputMethodKit")]
         ),
-        .testTarget(name: "SumibiPrototypeCoreTests", dependencies: ["SumibiPrototypeCore"])
+        .testTarget(name: "SumibiPrototypeCoreTests", dependencies: ["SumibiPrototypeCore"]),
+        .testTarget(
+            name: "SumibiPrototypeIMETests",
+            dependencies: ["SumibiPrototypeIME"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        )
     ]
 )
