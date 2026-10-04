@@ -93,7 +93,7 @@ InputMethodKitは、macOSの入力メソッドと各アプリの間を接続す�
 - 変換結果の確定
 - 入力先変更時の状態破棄
 
-現在の実装では、macOS 27でキー消費直後にもコントローラーが終了・再生成されることを観測したため、有効な入力経路の状態を`PrototypeRuntime`で共有し、短いセッション再生成をまたいで保持している。実際の入力先変更時は追跡を破棄し、要求IDと入力先の文字列・範囲の照合で誤置換を防ぐ。状態の所有者・寿命とIssue #45の責務分割は[入力コントローラーの構成](INPUT_CONTROLLER_ARCHITECTURE.md)を参照する。
+現在の実装では、macOS 27でキー消費直後にもコントローラーが終了・再生成されることを観測したため、有効な入力経路の状態を`InputRuntime`で共有し、短いセッション再生成をまたいで保持している。実際の入力先変更時は追跡を破棄し、要求IDと入力先の文字列・範囲の照合で誤置換を防ぐ。状態の所有者・寿命とIssue #45の責務分割は[入力コントローラーの構成](INPUT_CONTROLLER_ARCHITECTURE.md)を参照する。
 
 ### 4.3 IMKTextInput
 
@@ -308,7 +308,7 @@ BYOKの設定とデフォルトOFFの文脈利用設定をmacOS版の仕様に�
 
 アイコン素材はiOS版の`SumibiApp/Assets.xcassets/AppIcon.appiconset/AppIcon.png`をベースにする。形状・モチーフと地の色`#FA8F12`を揃えたmacOS版の素材をSumibi-mac側で独立して管理する。macOS用の角丸・余白・影は維持する。これは画像素材の流用であり、コードや共通パッケージの共有ではない。iOS版の元画像は変更しない。メニューバー用の小さい表示でも明暗の背景に対して見やすいことを確認する。
 
-アプリアイコンの再生成は、Sumibi-macのルートで`swift Prototype/AppIcon.swift <iOS版のAppIcon.pngへのパス> FA8F12 Prototype/Resources/AppIcon.png`を実行する。生成後のPNGをリポジトリへ保存し、`Prototype/build.sh`で`.icns`へ変換してアプリへ組み込む。
+アプリアイコンの再生成は、Sumibi-macのルートで`swift Development/Tools/AppIcon.swift <iOS版のAppIcon.pngへのパス> FA8F12 App/Resources/AppIcon.png`を実行する。生成後のPNGをリポジトリへ保存し、`App/build.sh`で`.icns`へ変換してアプリへ組み込む。
 
 保存先の基本方針：
 
@@ -321,12 +321,12 @@ BYOKの設定とデフォルトOFFの文脈利用設定をmacOS版の仕様に�
 
 BYOKでの実変換は実装済みである。
 
-- `Sources/SumibiPrototypeCore/Conversion.swift`: 要求の型、1,000文字の上限、プロンプト組み立て、候補の取り出し。OSに依存せず自動テストの対象。
-- `Sources/SumibiPrototypeCore/OpenAICompatibleClient.swift`: OpenAI互換のchat completions APIへの要求。エンドポイントの補完（`https://api.openai.com` → `…/v1/chat/completions`）、状態コードの分類、タイムアウト60秒。模擬応答の`MockConversionService`も同じ場所にある。
-- `Sources/SumibiPrototypeIME/Conversion/ConversionCoordinator.swift`: 設定とKeychainから送信先を組み立てる。APIキーが未設定、またはデータ送信への同意がない場合は通信しない。
+- `Sources/SumibiCore/Conversion.swift`: 要求の型、1,000文字の上限、プロンプト組み立て、候補の取り出し。OSに依存せず自動テストの対象。
+- `Sources/SumibiCore/OpenAICompatibleClient.swift`: OpenAI互換のchat completions APIへの要求。エンドポイントの補完（`https://api.openai.com` → `…/v1/chat/completions`）、状態コードの分類、タイムアウト60秒。模擬応答の`MockConversionService`は`Sources/SumibiIME/Development/`に分離し、明示的な開発版だけにコンパイルする。
+- `Sources/SumibiIME/Conversion/ConversionCoordinator.swift`: 設定とKeychainから送信先を組み立てる。APIキーが未設定、またはデータ送信への同意がない場合は通信しない。
 - プロンプトと候補の指示は、iOS版の`OpenAICompatibleClient`の文面に合わせている。コードは共有しない。
 - 送信への同意は送信先ごとに`UserDefaults`へ保存し、APIのURLを変えたら取り消す。
-- 開発用に`PrototypeResponseMode`で模擬応答へ切り替えられる。`api`（既定・実際に通信する）、`success`、`slow`、`failure`、`timeout`。
+- 明示的な開発版のみ`PrototypeResponseMode`で模擬応答へ切り替えられる。通常版では模擬応答・入力内容の診断をコンパイルしない。構成・ビルド手順は[ビルドモード](BUILD_MODES.md)を参照。`api`（既定・実際に通信する）、`success`、`slow`、`failure`、`timeout`。
 - ユーザー辞書はiOS版と同じ行形式・保存時の検証規則をmacOS版へ独立して実装した。設定画面の詳細シートで編集し、このMacの`UserDefaults`へ保存する。初回変換・追加候補要求ごとに保存済み内容を読み、システムプロンプトのデータ領域に載せる。辞書内の文章は指示として扱わせない。原文・現在の結果・辞書の文字数合計が1,000を超えれば送信前にエラーにする。iOS版の最大保存量2,000文字まで登録は可能だが、変換時の合計上限はmacOS版の仕様を優先する。
 - 設定ウィンドウは通常Sumibi自身の入力先として変換対象外にするが、ユーザー辞書の編集シートが開いている間だけ自アプリの入力を許可する。シートが閉じたら再び対象外に戻す。未確定文字列が残った状態で保存するとSwiftUIの値への反映が間に合わないため、保存時に`NSTextView.hasMarkedText()`を確認して確定を促す。
 - 周辺文脈、文体プリセット、利用状況の記録は未実装。変換指示はプロンプトで「ありません」として送る。
@@ -427,10 +427,10 @@ Codex CLIなど他のTUIでは確かめていない。
 
 Emacs.appの中では変換を行わず、キーをすべてEmacsへそのまま渡す（仕様は[仕様書の3.5](SPEC.md#35-対象外のアプリ)）。
 
-- 判定: 入力先の`bundleIdentifier()`を、`Sources/SumibiPrototypeCore/ExcludedApplications.swift`の一覧と大文字小文字を区別せずに比べる。一覧は`org.gnu.Emacs`と`org.gnu.Aquamacs`。GNU Emacs本体・Emacs Mac PortのInfo.plistは`org.gnu.Emacs`、Aquamacsは`org.gnu.Aquamacs`であることを各配布元のソースで確かめた。emacs-plusはGNU Emacsのソースをそのままビルドするため、識別子も同じである。識別子が得られない入力先は対象外にしない。
+- 判定: 入力先の`bundleIdentifier()`を、`Sources/SumibiCore/ExcludedApplications.swift`の一覧と大文字小文字を区別せずに比べる。一覧は`org.gnu.Emacs`と`org.gnu.Aquamacs`。GNU Emacs本体・Emacs Mac PortのInfo.plistは`org.gnu.Emacs`、Aquamacsは`org.gnu.Aquamacs`であることを各配布元のソースで確かめた。emacs-plusはGNU Emacsのソースをそのままビルドするため、識別子も同じである。識別子が得られない入力先は対象外にしない。
 - `handle(_:client:)`: 対象外のアプリでは、キーを解釈する前に`false`を返す。`Control + J`はEmacsの`C-j`として動く。
 - 他のアプリの入力を終える: 対象外のアプリで`activateServer`または`handle`が呼ばれたとき、他のアプリで追跡中・応答待ち中・候補窓の表示中なら、別アプリへの切り替えと同じ`cancelForTargetChange()`で終える。変換要求は取り消し、未確定だった文字は保留文字としてIMEメニューから救済できる。
-- 書き込み先から外す: 状態はプロセス全体で1つ（`PrototypeRuntime`）のため、応答の書き込み先を探す`liveInput()`と`completeIfReady`から、対象外のアプリの入力先を除く。対象外のアプリのセッションは`runtime.latest`にしない。
+- 書き込み先から外す: 状態はプロセス全体で1つ（`InputRuntime`）のため、応答の書き込み先を探す`liveInput()`と`completeIfReady`から、対象外のアプリの入力先を除く。対象外のアプリのセッションは`runtime.latest`にしない。
 - `deactivateServer`・`commitComposition`: 対象外のアプリでは何もしない。何も書いていないので確定するものがなく、ここで状態を消すと移った先の入力を壊しうる。
 - IMEメニュー: 入力先が対象外のアプリのとき、選択できない項目「Emacs.appではEmacs版のSumibiを使ってください」を出す。
 
@@ -438,7 +438,7 @@ Emacs.appの中では変換を行わず、キーをすべてEmacsへそのまま
 
 API設定（APIのURL、モデル名、APIキー）は実装済みである。
 
-- 画面: `Sources/SumibiPrototypeIME/Settings/APISettingsView.swift`。SwiftUIの`Form`をNSHostingViewでウィンドウへ載せる。
+- 画面: `Sources/SumibiIME/Settings/APISettingsView.swift`。SwiftUIの`Form`をNSHostingViewでウィンドウへ載せる。
 - 入口: メニューバーのSumibiアイコンと、IMEメニューの「Sumibi設定…」。IMEは`LSUIElement`のアプリのため、ウィンドウを出す直前に活性化ポリシーを`.accessory`へ切り替えて前面に出す。
 - APIのURLとモデル名: `UserDefaults`のキー`providerConfiguration`へJSONで保存する。項目名と既定値はiOS版の`ProviderConfiguration`に合わせる。
 - APIキー: Keychainの汎用パスワード。サービス名`org.sumibi.Sumibi-mac.api-key`、アカウント`default`、`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`、iCloud同期なし。サービス名をバンドル識別子から作らないのは、識別子を変えたときに保存済みのキーを失わないためである。
@@ -450,13 +450,13 @@ API設定（APIのURL、モデル名、APIキー）は実装済みである。
 
 メニューバーのSumibiアイコンと、そこから設定を開くメニューは実装済みである。
 
-- コード: `Sources/SumibiPrototypeIME/MenuBar/MenuBarController.swift`。`NSStatusItem`を起動時に1つ作る。
+- コード: `Sources/SumibiIME/MenuBar/MenuBarController.swift`。`NSStatusItem`を起動時に1つ作る。
 - **IMEと同じプロセスに置く。** 入力ソースとしてSumibiが選ばれていなくても、プロセスが動いている間はアイコンが出続ける。別プロセスのヘルパーにしなかったのは、設定（`UserDefaults`）とKeychainを共有するためにApp Groupやアクセスグループが要り、署名と配布の手間が増えるためである。設定画面で保存した値を、変換がそのまま読めるという利点もある。
 - **ログイン時の起動。** ログイン直後はSumibiを一度も選ばなければIMEのプロセスが起動せず、アイコンも出ない。そこでIMEのアプリ自身を`SMAppService.mainApp`でログイン項目へ登録する。IMEのプロセスが先に動いていても、Sumibiを選べばIMKはそのプロセスへ接続する。`open`で起動したプロセスのまま入力コントローラーが作られ`activateServer`が呼ばれること、2つ目のプロセスが起動しないことを確認した（2026-09-23）。
 - 登録は初回起動時に自動で行う。`SMAppService.mainApp.status`は、一度も登録していない状態でも`.notRegistered`ではなく`.notFound`を返した（macOS 27、`~/Library/Input Methods`に置いた場合）。このため、`.enabled`・`.requiresApproval`以外なら登録を試す。
 - メニューの「ログイン時に起動」で登録を取り消せる。取り消したことは`UserDefaults`のキー`MenuBarLoginItemOptOut`に記録し、次に起動したときも自動では登録し直さない。システム設定の「ログイン項目」で切られた場合（`.requiresApproval`）は、アプリからは戻せないため、メニューからその設定画面を開く。
 - メニュー: 「Sumibi設定…」「ログイン時に起動」。エラーの印と詳細の表示は、失敗の知らせ方を決める別Issue（#12）で追加する。
-- アイコン: iOS版の`AppIcon.png`（橙地に黒の線画）から線画だけを取り出したテンプレート画像。`Prototype/MenuBarIcon.swift`で作り、生成物の`Prototype/Resources/MenuBarIcon.png`・`MenuBarIcon@2x.png`（18pt）をリポジトリで管理する。iOS版の元画像は変更しない。テンプレート画像なので、システムが他のメニューバー項目と同じ色（明るい背景では黒、暗い背景では白）で描く。
+- アイコン: iOS版の`AppIcon.png`（橙地に黒の線画）から線画だけを取り出したテンプレート画像。`Development/Tools/MenuBarIcon.swift`で作り、生成物の`App/Resources/MenuBarIcon.png`・`MenuBarIcon@2x.png`（18pt）をリポジトリで管理する。iOS版の元画像は変更しない。テンプレート画像なので、システムが他のメニューバー項目と同じ色（明るい背景では黒、暗い背景では白）で描く。
 
 確認したこと（2026-09-23、macOS 27。IMKの接続を除き、入力ソースは`ABC`のまま）:
 
@@ -498,7 +498,7 @@ Mac App Storeでの配布は見送る。配布物はGitHub Releasesの署名・�
 
 - 識別子は頭の`org.sumibi.`をiOS版（`org.sumibi.Sumibi-iOS`）とそろえ、#4 で登録が通った`.inputmethod.`を含める。iOS版と同じ識別子にしないのは、Apple シリコンのMacへiOS版が入ったときに同じ識別子のアプリが2つになるためである。
 - 表示名はiOS版のアプリ名・キーボード名と同じ「Sumibi」とする。
-- アプリアイコンは、iOS版の線画をiOS版と同じ地の色`#FA8F12`のmacOSの角丸の正方形に描いたもの（`Prototype/AppIcon.swift`、`Prototype/Resources/AppIcon.png`）。2026-09-28の初期版では`#CC6508`を使っていたが、Issue #38でiOS版と同じ色へ変更した。入力メニューのアイコンは、メニューバーのアイコンと同じ線画だけの型抜き画像にし、`TISIconIsTemplate`を指定する。macOSは入力メニューのアイコンを型抜きとして描くため、地の塗られた画像は豆腐のような四角になった。
+- アプリアイコンは、iOS版の線画をiOS版と同じ地の色`#FA8F12`のmacOSの角丸の正方形に描いたもの（`Development/Tools/AppIcon.swift`、`App/Resources/AppIcon.png`）。2026-09-28の初期版では`#CC6508`を使っていたが、Issue #38でiOS版と同じ色へ変更した。入力メニューのアイコンは、メニューバーのアイコンと同じ線画だけの型抜き画像にし、`TISIconIsTemplate`を指定する。macOSは入力メニューのアイコンを型抜きとして描くため、地の塗られた画像は豆腐のような四角になった。
 - 試作版で保存した送信先・モデル・同意は、製品版の初回起動時に一度だけ写す（`SettingsStore.importPrototypeSettingsIfNeeded`）。製品版に送信先の設定がないときだけ写し、試作版の設定は消さない。APIキーはKeychain（サービス名`org.sumibi.Sumibi-mac.api-key`）にあり、識別子に依存しない。
 
 試作版からの切り替え手順（2026-09-28、macOS 27で確認）:

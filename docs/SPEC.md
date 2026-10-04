@@ -27,7 +27,7 @@ iOS版のカスタムキーボードとは異なり、macOSの入力メソッド
 - iOS版とmacOS版ではコードを共有しない。macOS版のソースコードと依存関係はSumibi-macリポジトリで独立して管理する。iOS版は設計・実装の参考とし、共通パッケージへの依存や両版の実装同期は行わない。
 - macOS固有の入力処理とUIは、macOSの標準的な操作や外観に合わせて設計する。
 - macOS版のSumibiアプリアイコンはiOS版のアイコン素材を流用し、形状・モチーフと背景の橙色を揃える。macOS用の角丸・余白・影は維持する。
-- アイコン素材の流用は、両版でコードを共有しない方針とは区別する。生成した素材はSumibi-mac側で独立して管理し、iOS版のアイコンは変更しない。地の色はiOS版と同じ`#FA8F12`とする。素材は`Prototype/AppIcon.swift`でiOS版から作り、`Prototype/Resources/AppIcon.png`として管理する。
+- アイコン素材の流用は、両版でコードを共有しない方針とは区別する。生成した素材はSumibi-mac側で独立して管理し、iOS版のアイコンは変更しない。地の色はiOS版と同じ`#FA8F12`とする。素材は`Development/Tools/AppIcon.swift`でiOS版から作り、`App/Resources/AppIcon.png`として管理する。
 - 自己配布版の変換には、対応するmacOS 26以降で利用者自身のAPIキー（BYOK: Bring Your Own Key）を必要とする。Appleの現行案内はPCCの本番利用をApp Store配布アプリに限定しているため、自己配布版でPCCを利用できると保証しない。
 - 仕様が未確定の機能は、合意を得てから実装する。
 - Mac App Storeでは配布しない。署名・公証済みのmacOSインストーラーをGitHub Releasesの添付ファイルとして公開し、GitHub Pagesでダウンロードページをホストする。インストーラーの内容と公開前の確認事項は[`DIRECT_DISTRIBUTION.md`](DIRECT_DISTRIBUTION.md)に記録する。
