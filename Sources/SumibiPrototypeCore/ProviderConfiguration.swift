@@ -82,9 +82,10 @@ extension ProviderConfiguration {
 public enum APIKeyDisplay {
     public static func masked(for apiKey: String) -> String? {
         guard !apiKey.isEmpty else { return nil }
-        guard apiKey.count > 4 else { return String(repeating: "•", count: apiKey.count) }
-        let suffix = apiKey.suffix(4)
-        return String(repeating: "•", count: apiKey.count - suffix.count) + suffix
+        // Fixed-width mask: long keys must not produce several lines of bullets.
+        // Short keys are fully hidden rather than displayed in their entirety.
+        guard apiKey.count > 4 else { return "****" }
+        return "****" + apiKey.suffix(4)
     }
 
     /// 入力されたAPIキーとして受け付けられるか。前後の空白は取り除いてから渡す。

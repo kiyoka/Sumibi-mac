@@ -27,17 +27,41 @@ struct APISettingsView: View {
                         .focused($focusedField, equals: .modelName)
                         .accessibilityLabel("モデル名（自由入力）")
                 }
-                SecureField(model.hasStoredAPIKey ? "APIキー（保存済み）" : "APIキー", text: $model.apiKey)
-                    .focused($focusedField, equals: .apiKey)
-                LabeledContent("保存済みAPIキー") {
-                    Text(model.storedAPIKeyDisplay ?? "未設定")
-                        .monospaced()
-                        .privacySensitive()
+                if model.showsAPIKeyEditor {
+                    SecureField(model.hasStoredAPIKey ? "新しいAPIキー" : "APIキー", text: $model.apiKey,
+                                prompt: Text("APIキーを入力"))
+                        .focused($focusedField, equals: .apiKey)
+                    if model.hasStoredAPIKey {
+                        LabeledContent("現在のAPIキー") {
+                            Text(model.storedAPIKeyDisplay ?? "未設定")
+                                .monospaced()
+                                .privacySensitive()
+                                .lineLimit(1)
+                        }
+                        Button("APIキーの変更をキャンセル") {
+                            model.cancelAPIKeyEditing()
+                            focusedField = nil
+                        }
+                    }
+                } else {
+                    LabeledContent("APIキー（保存済み）") {
+                        HStack {
+                            Text(model.storedAPIKeyDisplay ?? "未設定")
+                                .monospaced()
+                                .privacySensitive()
+                                .lineLimit(1)
+                            Button("変更") {
+                                model.beginAPIKeyEditing()
+                                focusedField = .apiKey
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
                 }
             } header: {
                 Text("API設定")
             } footer: {
-                Text("APIのURLとモデル名はこのMacの設定に、APIキーはKeychainへ保存します。")
+                Text("APIのURLとモデル名はこのMacの設定に、APIキーはKeychainへ保存します。保存済みキーを変更するときは「変更」を押して新しいキーを入力し、「設定を保存」を押してください。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -151,12 +175,30 @@ final class APISettingsModel {
     private(set) var statusIsError = false
 
     private var savedConfiguration = ProviderConfiguration()
-    private let settings = SettingsStore()
-    private let keys = APIKeyStore()
+    private let settings: SettingsStore
+    private let keys: APIKeyStore
+
+    init(settings: SettingsStore = SettingsStore(), keys: APIKeyStore = APIKeyStore()) {
+        self.settings = settings
+        self.keys = keys
+    }
 
     private(set) var hasConsent = false
+    private(set) var isEditingAPIKey = false
 
     var hasStoredAPIKey: Bool { storedAPIKeyDisplay != nil }
+
+    var showsAPIKeyEditor: Bool { !hasStoredAPIKey || isEditingAPIKey }
+
+    func beginAPIKeyEditing() {
+        apiKey = ""
+        isEditingAPIKey = true
+    }
+
+    func cancelAPIKeyEditing() {
+        apiKey = ""
+        isEditingAPIKey = false
+    }
 
     var savedEndpointDisplay: String { savedConfiguration.endpoint }
 
@@ -197,6 +239,7 @@ final class APISettingsModel {
         showModel(savedConfiguration.model)
         hasConsent = settings.hasConsent(for: savedConfiguration.endpoint)
         apiKey = ""
+        isEditingAPIKey = false
         do {
             storedAPIKeyDisplay = try keys.load().flatMap { APIKeyDisplay.masked(for: $0) }
         } catch {
@@ -234,6 +277,7 @@ final class APISettingsModel {
                 try keys.save(trimmedKey)
                 storedAPIKeyDisplay = APIKeyDisplay.masked(for: trimmedKey)
                 apiKey = ""
+                isEditingAPIKey = false
             }
             if !hasStoredAPIKey {
                 report("設定を保存しました。APIキーを入力すると変換できます。", isError: false)
@@ -262,6 +306,7 @@ final class APISettingsModel {
         do {
             try keys.delete()
             apiKey = ""
+            isEditingAPIKey = false
             storedAPIKeyDisplay = nil
             report("APIキーを削除しました。", isError: false)
         } catch {

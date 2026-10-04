@@ -16,6 +16,11 @@ struct ReplacementInput {
         readSubstring = { input.attributedSubstring(from: $0) }
     }
 
+    init(_ input: any InputClient) {
+        selectedRange = { input.selectedRange() }
+        readSubstring = { input.attributedSubstring(from: $0) }
+    }
+
     init(selectedRange: @escaping () -> NSRange, substring: @escaping (NSRange) -> String?) {
         self.selectedRange = selectedRange
         readSubstring = { substring($0).map { NSAttributedString(string: $0) } }

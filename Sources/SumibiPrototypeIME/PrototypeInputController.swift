@@ -81,13 +81,7 @@ final class PrototypeInputController: IMKInputController {
                 return true
             }
             guard !state.marked.isEmpty || state.pending != nil else { return false }
-            let effects = state.cancelComposition(originalCommitted: runtime.originalCommitted)
-            clearPendingRuntime()
-            anchor = nil
-            pendingTarget = nil
-            runtime.selectionRange = nil
-            runtime.originalCommitted = false
-            runtime.candidates.dictionaryCandidates = []
+            let effects = runtime.cancelComposition()
             _ = apply(effects, to: input)
             runtime.lastConsumedAt = Date()
             diag.notice("composition cancelled with Esc effects=\(effects.count, privacy: .public)")
@@ -412,10 +406,11 @@ final class PrototypeInputController: IMKInputController {
 
     private func apply(_ effects: [SessionEffect], to input: IMKTextInput) -> Bool {
         InputEffectApplier(runtime: runtime,
-                           startConversion: { [self] id, request in startConversion(id: id, request: request) },
-                           pokeClient: { [self] input in pokeClient(input) },
-                           selectCandidate: { [weak self] index in self?.chooseCandidate(at: index, in: nil) })
-            .apply(effects, to: input)
+                       startConversion: { [self] id, request in startConversion(id: id, request: request) },
+                       pokeClient: { [self] _ in pokeClient(input) },
+                       selectCandidate: { [weak self] index in self?.chooseCandidate(at: index, in: nil) },
+                       diagnoseText: UserDefaults.standard.bool(forKey: "PrototypeDiagnoseText"))
+        .apply(effects, to: IMKInputClient(input))
     }
 
     /// 選択範囲とその文字列。読めない入力先ではnilを返し、何も書き換えない。
@@ -500,18 +495,7 @@ final class PrototypeInputController: IMKInputController {
         cancelForTargetChange()
     }
 
-    private func clearPendingRuntime() {
-        runtime.conversion.cancel()
-        hideCandidatePanel()
-    }
-
     private func cancelForTargetChange(rescueMarked: Bool = true) {
-        clearPendingRuntime()
-        // 原文を確定済みなら、すでに入力先にあるので保留文字として救済しない。
-        let effects = state.cancelForTargetChange(rescueMarked: rescueMarked && !runtime.originalCommitted)
-        runtime.originalCommitted = false
-        for case .rescueText(let text) in effects { rescuedText += text }
-        anchor = nil
-        pendingTarget = nil
+        runtime.cancelForTargetChange(rescueMarked: rescueMarked)
     }
 }

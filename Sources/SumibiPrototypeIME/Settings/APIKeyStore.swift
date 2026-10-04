@@ -7,6 +7,25 @@ public enum APIKeyStoreError: Error, Equatable {
     case keychain(OSStatus)
 }
 
+/// Injectable Security boundary. Tests never need to access the user's Keychain.
+protocol KeychainAccess {
+    func copyMatching(_ query: CFDictionary) -> (OSStatus, CFTypeRef?)
+    func update(_ query: CFDictionary, attributes: CFDictionary) -> OSStatus
+    func add(_ item: CFDictionary) -> OSStatus
+    func delete(_ query: CFDictionary) -> OSStatus
+}
+
+struct SystemKeychainAccess: KeychainAccess {
+    func copyMatching(_ query: CFDictionary) -> (OSStatus, CFTypeRef?) {
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query, &result)
+        return (status, result)
+    }
+    func update(_ query: CFDictionary, attributes: CFDictionary) -> OSStatus { SecItemUpdate(query, attributes) }
+    func add(_ item: CFDictionary) -> OSStatus { SecItemAdd(item, nil) }
+    func delete(_ query: CFDictionary) -> OSStatus { SecItemDelete(query) }
+}
+
 /// APIキーをKeychainへ保存する。`UserDefaults`や設定ファイルには平文で置かない。
 ///
 /// 項目の持ち方はSumibi-iOSの`APIKeyStore`に合わせる。コードは共有しない。
@@ -14,14 +33,16 @@ public enum APIKeyStoreError: Error, Equatable {
 struct APIKeyStore {
     private static let service = "org.sumibi.Sumibi-mac.api-key"
     private static let account = "default"
+    private let keychain: any KeychainAccess
+
+    init(keychain: any KeychainAccess = SystemKeychainAccess()) { self.keychain = keychain }
 
     func load() throws -> String? {
         var query = Self.baseQuery
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
 
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        let (status, result) = keychain.copyMatching(query as CFDictionary)
         if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess else { throw APIKeyStoreError.keychain(status) }
         guard let data = result as? Data, let apiKey = String(data: data, encoding: .utf8) else {
@@ -38,18 +59,18 @@ struct APIKeyStore {
             kSecAttrSynchronizable as String: false,
         ]
 
-        let updateStatus = SecItemUpdate(Self.baseQuery as CFDictionary, attributes as CFDictionary)
+        let updateStatus = keychain.update(Self.baseQuery as CFDictionary, attributes: attributes as CFDictionary)
         if updateStatus == errSecSuccess { return }
         guard updateStatus == errSecItemNotFound else { throw APIKeyStoreError.keychain(updateStatus) }
 
         var item = Self.baseQuery
         attributes.forEach { item[$0.key] = $0.value }
-        let addStatus = SecItemAdd(item as CFDictionary, nil)
+        let addStatus = keychain.add(item as CFDictionary)
         guard addStatus == errSecSuccess else { throw APIKeyStoreError.keychain(addStatus) }
     }
 
     func delete() throws {
-        let status = SecItemDelete(Self.baseQuery as CFDictionary)
+        let status = keychain.delete(Self.baseQuery as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw APIKeyStoreError.keychain(status)
         }

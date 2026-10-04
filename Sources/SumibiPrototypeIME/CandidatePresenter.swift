@@ -31,7 +31,7 @@ final class CandidatePresenter {
 
     init(window: (any CandidateDisplaying)? = nil) { suppliedWindow = window }
 
-    func show(candidates: [String], in input: any IMKTextInput, onSelect: @escaping (Int) -> Void) {
+    func show(candidates: [String], in input: any InputClient, onSelect: @escaping (Int) -> Void) {
         let rect = lineRectNearCaret(in: input) ?? lastLineRect
         let topLeft = rect.map { NSPoint(x: $0.minX, y: $0.minY) } ?? NSEvent.mouseLocation
         show(candidates: candidates, topLeft: topLeft, onSelect: onSelect)
@@ -73,12 +73,11 @@ final class CandidatePresenter {
     }
 
     /// Just before the caret, then at the caret, using screen-coordinate line rectangles.
-    private func lineRectNearCaret(in input: any IMKTextInput) -> NSRect? {
+    private func lineRectNearCaret(in input: any InputClient) -> NSRect? {
         let caret = input.selectedRange().location
         guard caret != NSNotFound else { return nil }
         for index in [caret - 1, caret] where index >= 0 {
-            var rect = NSRect.zero
-            _ = input.attributes(forCharacterIndex: index, lineHeightRectangle: &rect)
+            let rect = input.lineRect(at: index)
             if rect.height > 0 { return rect }
         }
         return nil
