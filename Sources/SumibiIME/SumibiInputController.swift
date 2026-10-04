@@ -18,7 +18,6 @@ final class SumibiInputController: IMKInputController {
     private var candidateWindow: CandidatePresenter { runtime.candidates }
     private var rescuedText: String { get { runtime.rescuedText } set { runtime.rescuedText = newValue } }
     private var deferredControls: [String] { get { runtime.deferredControls } set { runtime.deferredControls = newValue } }
-    private var lastError: String? { get { runtime.lastError } set { runtime.lastError = newValue } }
 
     /// ログ上でコントローラーのインスタンスを見分けるための短い識別子。
     private let diagID = String(UUID().uuidString.prefix(4))
@@ -264,8 +263,8 @@ final class SumibiInputController: IMKInputController {
             item.isEnabled = false
             menu.addItem(item)
         }
-        if let lastError {
-            let item = NSMenuItem(title: lastError, action: nil, keyEquivalent: "")
+        if let notice = runtime.feedback.notice {
+            let item = NSMenuItem(title: notice.title, action: nil, keyEquivalent: "")
             item.isEnabled = false
             menu.addItem(item)
         }
@@ -313,7 +312,7 @@ final class SumibiInputController: IMKInputController {
             let shouldRetry = runtime.conversion.recordUnavailableClient()
             diag.notice("finishRequest: no live client (retry \(self.runtime.conversion.retryCount, privacy: .public))")
             if !shouldRetry {
-                lastError = "入力先に接続できないため変換結果を適用できませんでした"
+                runtime.feedback.report(.inputUnavailable)
                 cancelForTargetChange()
             } else {
                 scheduleFinish(id: number.intValue, delay: 0.25, retry: true)
@@ -335,7 +334,6 @@ final class SumibiInputController: IMKInputController {
         }
         guard let outcome = runtime.conversion.takeOutcome(id: request.id) else { return }
         pendingTarget = nil
-        if case .failure(let error) = outcome { lastError = error.message }
         let effects: [SessionEffect]
         switch request.kind {
         case .first:
@@ -420,7 +418,7 @@ final class SumibiInputController: IMKInputController {
         guard range.location != NSNotFound, range.length > 0 else { return nil }
         guard let text = input.attributedSubstring(from: range)?.string, !text.isEmpty else {
             diag.notice("selection could not be read length=\(range.length, privacy: .public)")
-            lastError = "この入力先では、選択した文字列を読み取れませんでした。"
+            runtime.feedback.report(.selectionUnreadable)
             return nil
         }
         return (range, text)
