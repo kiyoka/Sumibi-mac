@@ -97,7 +97,7 @@ struct InputEffectApplier {
                 // 古いカーソル位置を返すことがあり、それを信じると次の置換位置がずれる。
                 runtime.replacement.anchor = ReplacementAnchor(end: range.location + new.utf16.count, text: new)
             case .overLimit:
-                runtime.lastError = "変換対象は1,000文字までです"
+                runtime.feedback.report(.failure(.overLimit(count: state.marked.count, limit: 1_000)))
             case .rescueText(let text):
                 runtime.rescuedText += text
             }

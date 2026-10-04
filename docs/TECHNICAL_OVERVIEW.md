@@ -85,7 +85,7 @@ Undoは入力先の標準編集履歴へ委ねる。原文の確定と範囲指�
 
 [MenuBarController](../Sources/SumibiIME/MenuBar/MenuBarController.swift)のNSStatusItemは同じプロセスが動いている間、Sumibiが入力ソースでなくても表示する。SMAppService.mainAppでアプリ自身をログイン項目へ登録し、利用者の解除は`MenuBarLoginItemOptOut`で記憶する。独立ヘルパーではない。
 
-専用メニューバーには設定・ログイン起動の項目がある。エラー印・クリック時の詳細表示は未実装（#12）。現在は`lastError`と未適用制御キーをIMEメニューへ表示する。設定画面だけを開く`--settings`は明示的な開発ビルド限定で、通常版の機能ではない。
+専用メニューバーには設定・ログイン起動の項目がある。#12の作業版では変換中・エラーの印と、クリック時の固定文による原因・対処・解除を追加した。`ConversionFeedback`は入力処理と独立し、最新エラー1件をメモリ上だけに保持する。実装・確認範囲は[変換状態の表示](CONVERSION_FEEDBACK.md)を参照。未適用制御キーは従来どおりIMEメニューへ表示する。設定画面だけを開く`--settings`は明示的な開発ビルド限定で、通常版の機能ではない。
 
 ## 8. 配布・検証の状態
 

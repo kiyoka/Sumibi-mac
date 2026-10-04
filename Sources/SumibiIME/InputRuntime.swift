@@ -9,11 +9,11 @@ final class InputRuntime {
     static let shared = InputRuntime()
     let state = InputSession()
     let replacement = TextReplacementTracker()
-    lazy var conversion = ConversionLifecycle(session: state)
+    let feedback = ConversionFeedback()
+    lazy var conversion = ConversionLifecycle(session: state, feedback: feedback)
     lazy var candidates = CandidatePresenter()
     var rescuedText = ""
     var deferredControls: [String] = []
-    var lastError: String?
     var lastConsumedAt = Date.distantPast
     /// Prefer the newest controller; keep the last handler as a client fallback.
     weak var latest: SumibiInputController?

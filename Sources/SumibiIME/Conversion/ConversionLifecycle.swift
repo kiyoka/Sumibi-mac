@@ -18,6 +18,7 @@ final class ConversionLifecycle {
     typealias Convert = (ConversionRequest) async -> Result<ConversionResult, ConversionError>
     private let session: InputSession
     private let convert: Convert
+    private let feedback: ConversionFeedback?
     private var task: Task<Void, Never>?
     private var timer: DispatchWorkItem?
     private var requestID: Int?
@@ -25,14 +26,17 @@ final class ConversionLifecycle {
     private(set) var readyAt: Date?
     private(set) var retryCount = 0
 
-    init(session: InputSession, convert: @escaping Convert = { await ConversionCoordinator().convert($0) }) {
+    init(session: InputSession, feedback: ConversionFeedback? = nil,
+         convert: @escaping Convert = { await ConversionCoordinator().convert($0) }) {
         self.session = session
+        self.feedback = feedback
         self.convert = convert
     }
 
     func start(id: Int, request: ConversionRequest, onReady: @escaping (Int) -> Void) {
         cancel()
         requestID = id
+        feedback?.begin()
         let convert = self.convert
         task = Task { [weak self] in
             let result = await convert(request)
@@ -48,6 +52,7 @@ final class ConversionLifecycle {
                     diag.notice("conversion succeeded id=\(id) candidates=\(result.candidates.count)")
                 case .failure(let error):
                     self.outcome = .failure(error)
+                    self.feedback?.report(.failure(error))
                     diag.notice("conversion failed id=\(id) retryable=\(error.isRetryable)")
                 }
                 self.readyAt = Date()
@@ -83,6 +88,7 @@ final class ConversionLifecycle {
     }
 
     func cancel() {
+        feedback?.finish()
         timer?.cancel()
         timer = nil
         task?.cancel()
