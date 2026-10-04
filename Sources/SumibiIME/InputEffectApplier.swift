@@ -1,9 +1,7 @@
 import AppKit
 import InputMethodKit
 import SumibiCore
-import os
 
-private let diag = Logger(subsystem: "org.sumibi.inputmethod.Sumibi", category: "diag")
 
 /// Applies state-machine effects to the explicit client, on the main thread.
 /// Stateless: runtime owns coordinates/flags; callbacks connect conversion and candidate selection.
@@ -12,7 +10,6 @@ struct InputEffectApplier {
     let startConversion: (Int, ConversionRequest) -> Void
     let pokeClient: (any InputClient) -> Void
     let selectCandidate: (Int) -> Void
-    var diagnoseText = false
     private var state: InputSession { runtime.state }
 
     func apply(_ effects: [SessionEffect], to input: any InputClient) -> Bool {
@@ -55,13 +52,6 @@ struct InputEffectApplier {
                     runtime.replacement.anchor = nil
                 }
                 runtime.replacement.pendingTarget = PendingTarget(requestID: id, selection: caret, expectedText: source, kind: .first)
-                #if SUMIBI_DEVELOPMENT
-                if diagnoseText, caret.location != NSNotFound {
-                    let start = max(0, caret.location - source.utf16.count - 40)
-                    let around = input.attributedSubstring(from: NSRange(location: start, length: caret.location - start))?.string ?? "(nil)"
-                    diag.notice("text: after commit caret=\(caret.location, privacy: .public) \(start, privacy: .public)..<\(caret.location, privacy: .public)=[\(around.replacingOccurrences(of: "\n", with: "\\n"), privacy: .public)]")
-                }
-                #endif
                 startConversion(id, ConversionRequest(source: source))
             case .startAlternatives(let id, let source, let current):
                 runtime.replacement.pendingTarget = PendingTarget(requestID: id, selection: input.selectedRange(),
@@ -97,6 +87,7 @@ struct InputEffectApplier {
                 // 古いカーソル位置を返すことがあり、それを信じると次の置換位置がずれる。
                 runtime.replacement.anchor = ReplacementAnchor(end: range.location + new.utf16.count, text: new)
             case .overLimit:
+                DiagnosticLog.record(.overLimit)
                 runtime.feedback.report(.failure(.overLimit(count: state.marked.count, limit: 1_000)))
             case .rescueText(let text):
                 runtime.rescuedText += text

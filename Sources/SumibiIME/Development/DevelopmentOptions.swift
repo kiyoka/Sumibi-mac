@@ -11,7 +11,6 @@ struct DevelopmentOptions {
     }
 
     let responseMode: String
-    let diagnoseText: Bool
     let pokeStyle: String
 
     static var current: Self { Self(defaults: .standard) }
@@ -19,12 +18,10 @@ struct DevelopmentOptions {
     init(defaults: UserDefaults) {
         #if SUMIBI_DEVELOPMENT
         responseMode = Self.responseMode(defaults.string(forKey: "PrototypeResponseMode"))
-        diagnoseText = defaults.bool(forKey: "PrototypeDiagnoseText")
         let requested = defaults.string(forKey: "PrototypePokeStyle") ?? "marked"
         pokeStyle = ["marked", "insert", "both", "off"].contains(requested) ? requested : "marked"
         #else
         responseMode = "api"
-        diagnoseText = false
         pokeStyle = "marked"
         #endif
     }

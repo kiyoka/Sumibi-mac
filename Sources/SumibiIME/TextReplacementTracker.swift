@@ -1,9 +1,7 @@
 import Foundation
 import InputMethodKit
 import SumibiCore
-import os
 
-private let diag = Logger(subsystem: "org.sumibi.inputmethod.Sumibi", category: "diag")
 
 /// Read-only boundary: tests can supply a document without starting an IMK server.
 /// Closures are evaluated at each read, not snapshotted before a re-anchor.
@@ -64,7 +62,7 @@ final class TextReplacementTracker {
               target.kind == request.kind else { return false }
         // いずれの要求も、記録した位置(アンカー)に記録した文字列がまだあることを確かめてから置換する。
         let ok = target.selection == input.selectedRange() && validatesAnchor(in: input, expected: target.expectedText)
-        diag.notice("validate \(String(describing: request.kind), privacy: .public): ok=\(ok, privacy: .public)")
+        DiagnosticLog.record(.targetValidated)
         return ok
     }
 
@@ -77,7 +75,7 @@ final class TextReplacementTracker {
         let selection = input.selectedRange()
         guard selection.length == 0, selection.location == anchor.end + length,
               input.attributedSubstring(from: NSRange(location: anchor.end, length: length))?.string == anchor.text else { return }
-        diag.notice("finishRequest: caret caught up with the written source; re-anchoring")
+        DiagnosticLog.record(.targetReanchored)
         self.anchor = ReplacementAnchor(end: selection.location, text: anchor.text)
         pendingTarget = PendingTarget(requestID: target.requestID, selection: selection,
                                       expectedText: target.expectedText, kind: target.kind)
@@ -93,10 +91,10 @@ final class TextReplacementTracker {
         guard selection.location != NSNotFound, selection.length == 0,
               let span = wrappedSpan(of: anchor.text, endingAt: selection.location, in: input)
         else {
-            diag.notice("reanchor at caret: source not found before caret=\(selection.location, privacy: .public)")
+            DiagnosticLog.record(.reanchorUnavailable)
             return
         }
-        diag.notice("reanchor at caret: moved anchor \(anchor.end, privacy: .public) -> \(selection.location, privacy: .public) span=\(span, privacy: .public)")
+        DiagnosticLog.record(.targetReanchored)
         self.anchor = ReplacementAnchor(end: selection.location, text: anchor.text, span: span)
         pendingTarget = PendingTarget(requestID: target.requestID, selection: selection,
                                       expectedText: target.expectedText, kind: target.kind)
@@ -114,55 +112,19 @@ final class TextReplacementTracker {
     }
 
     /// 記録した位置の文字列が一致しなかったとき、入力先が何を返したかを内容を出さずに記録する。
-    /// 返った長さ、最初に食い違う位置、その位置の文字の種類だけを出す。
+    /// 詳細設定時だけ範囲と返った文字数を出す。診断のために通常時の読み取りを増やさない。
     func reportTargetMismatch(in input: ReplacementInput) {
+        guard DiagnosticLog.isDetailedEnabled else { return }
         guard let anchor, anchor.end >= anchor.span else {
-            diag.notice("mismatch: no anchor")
+            DiagnosticLog.record(.anchorMissing)
             return
         }
         let range = anchor.range
         guard let actual = input.attributedSubstring(from: range)?.string else {
-            diag.notice("mismatch: substring unavailable range=\(range.location, privacy: .public),\(range.length, privacy: .public)")
+            DiagnosticLog.record(.substringUnavailable)
             return
         }
-        let expected = Array(anchor.text.unicodeScalars)
-        let returned = Array(actual.unicodeScalars)
-        let offset = zip(expected, returned).enumerated().first { $0.element.0 != $0.element.1 }?.offset
-            ?? min(expected.count, returned.count)
-        let kind: String
-        if offset < returned.count {
-            let scalar = returned[offset]
-            kind = if CharacterSet.newlines.contains(scalar) { "newline" }
-                else if CharacterSet.whitespaces.contains(scalar) { "space" }
-                else if CharacterSet.controlCharacters.contains(scalar) { "control" }
-                else if scalar.properties.generalCategory == .privateUse { "privateUse" }
-                else if scalar.isASCII { "ascii" }
-                else { "other" }
-        } else {
-            kind = "end"
-        }
-        diag.notice("mismatch: range=\(range.location, privacy: .public),\(range.length, privacy: .public) expectedScalars=\(expected.count, privacy: .public) returnedScalars=\(returned.count, privacy: .public) firstDiff=\(offset, privacy: .public) returnedKind=\(kind, privacy: .public)")
-        reportTargetText(in: input, recorded: range, actual: actual)
-    }
-
-    /// 開発版専用。`defaults write org.sumibi.inputmethod.Sumibi PrototypeDiagnoseText -bool true`のときだけ、
-    /// 入力先が返した文字列そのもの(入力内容と周囲の表示)を記録する。調べ終えたら`defaults delete`で戻す。
-    private func reportTargetText(in input: ReplacementInput, recorded range: NSRange, actual: String) {
-        #if SUMIBI_DEVELOPMENT
-        guard DevelopmentOptions.current.diagnoseText, let anchor else { return }
-        let visible: (String) -> String = { text in
-            text.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\n", with: "\\n")
-                .replacingOccurrences(of: "\r", with: "\\r").replacingOccurrences(of: "\t", with: "\\t")
-        }
-        let caret = input.selectedRange().location
-        let span = anchor.text.utf16.count + 40
-        let start = max(0, caret == NSNotFound ? 0 : caret - span)
-        let beforeCaret = caret == NSNotFound ? "" :
-            input.attributedSubstring(from: NSRange(location: start, length: caret - start))?.string ?? "(nil)"
-        diag.notice("text: expected=[\(visible(anchor.text), privacy: .public)]")
-        diag.notice("text: recorded \(range.location, privacy: .public)+\(range.length, privacy: .public)=[\(visible(actual), privacy: .public)]")
-        diag.notice("text: before caret \(start, privacy: .public)..<\(caret, privacy: .public)=[\(visible(beforeCaret), privacy: .public)]")
-        #endif
+        DiagnosticLog.record(.targetMismatch, counters: [range.location, range.length, actual.unicodeScalars.count])
     }
 
     /// 記録した位置に記録した文字列があるかを確かめる。なければ、カーソルの直前にあるかを確かめて記録し直す。
@@ -177,7 +139,7 @@ final class TextReplacementTracker {
         let selection = input.selectedRange()
         guard selection.location != NSNotFound, selection.length == 0,
               let span = wrappedSpan(of: anchor.text, endingAt: selection.location, in: input) else { return false }
-        diag.notice("anchor moved to caret: \(anchor.end, privacy: .public) -> \(selection.location, privacy: .public) span=\(span, privacy: .public)")
+        DiagnosticLog.record(.targetReanchored)
         self.anchor = ReplacementAnchor(end: selection.location, text: anchor.text, span: span)
         return true
     }
@@ -192,7 +154,7 @@ final class TextReplacementTracker {
         let selection = input.selectedRange()
         let caretAtEnd = selection.location == anchor.end && selection.length == 0
         guard caretAtEnd || selection == range else {
-            diag.notice("anchor rejected: selection=\(selection.location, privacy: .public),\(selection.length, privacy: .public) anchor=\(range.location, privacy: .public),\(range.length, privacy: .public)")
+            DiagnosticLog.record(.anchorRejected)
             return false
         }
         guard let actual = input.attributedSubstring(from: range)?.string else { return false }

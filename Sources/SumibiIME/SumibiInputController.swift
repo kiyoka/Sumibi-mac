@@ -2,11 +2,6 @@ import AppKit
 import Carbon
 import InputMethodKit
 import SumibiCore
-import os
-
-/// 入力処理の挙動を追うための診断ログ。通常版は入力内容を記録せず、文字数・キーコード・
-/// インスタンス識別子・範囲だけを出す。`log show --predicate 'subsystem == "..."'`で読む。
-private let diag = Logger(subsystem: "org.sumibi.inputmethod.Sumibi", category: "diag")
 
 // Keep the registered Objective-C name for IMK compatibility.
 @objc(SumibiPrototypeInputController)
@@ -19,8 +14,6 @@ final class SumibiInputController: IMKInputController {
     private var rescuedText: String { get { runtime.rescuedText } set { runtime.rescuedText = newValue } }
     private var deferredControls: [String] { get { runtime.deferredControls } set { runtime.deferredControls = newValue } }
 
-    /// ログ上でコントローラーのインスタンスを見分けるための短い識別子。
-    private let diagID = String(UUID().uuidString.prefix(4))
 
     override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
         super.init(server: server, delegate: delegate, client: inputClient)
@@ -28,15 +21,13 @@ final class SumibiInputController: IMKInputController {
         if !isExcluded(inputClient) { runtime.latest = self }
         // 新しいセッションは入力先が生きているので、返っている応答があればここで完了させる。
         DispatchQueue.main.async { [weak self] in self?.completeIfReady(reason: "new session") }
-        let clientObject = inputClient as AnyObject?
-        let bundleID = (inputClient as? IMKTextInput)?.bundleIdentifier() ?? "nil"
-        diag.notice("init id=\(self.diagID, privacy: .public) client=\(clientObject.map { String(describing: type(of: $0)) } ?? "nil", privacy: .public) clientAddr=\(clientObject.map { String(UInt(bitPattern: ObjectIdentifier($0).hashValue), radix: 16) } ?? "nil", privacy: .public) bundle=\(bundleID, privacy: .public)")
+        DiagnosticLog.record(.controllerCreated)
     }
 
-    deinit { diag.notice("deinit id=\(self.diagID, privacy: .public)") }
+    deinit { DiagnosticLog.record(.controllerReleased) }
 
     override func activateServer(_ sender: Any!) {
-        diag.notice("activateServer id=\(self.diagID, privacy: .public) marked=\(self.state.marked.count)")
+        DiagnosticLog.record(.controllerActivated)
         if isExcluded(sender) {
             leaveForExcludedApplication()
             super.activateServer(sender)
@@ -60,8 +51,7 @@ final class SumibiInputController: IMKInputController {
         }
         runtime.latest = self
         runtime.lastHandler = self
-        let before = state.marked.count
-        diag.notice("handle id=\(self.diagID, privacy: .public) type=\(event.type.rawValue) keyCode=\(event.keyCode) modifiers=\(event.modifierFlags.intersection(.deviceIndependentFlagsMask).rawValue, privacy: .public) markedBefore=\(before) isIMKTextInput=\(sender is IMKTextInput)")
+        DiagnosticLog.record(.keyHandled, counters: [state.marked.count])
         if event.type == .flagsChanged {
             if let input = sender as? IMKTextInput { watchCommandTap(event, in: input) }
             return false
@@ -84,18 +74,18 @@ final class SumibiInputController: IMKInputController {
             let effects = runtime.cancelComposition()
             _ = apply(effects, to: input)
             runtime.lastConsumedAt = Date()
-            diag.notice("composition cancelled with Esc effects=\(effects.count, privacy: .public)")
+            DiagnosticLog.record(.compositionCancelled)
             return true
         }
         // 応答は返っているのに、セッション終了で入力先へ書き込めなかった場合は、生きた入力先が確実にあるこの時点で完了させる。
         if let request = state.pending, let readyAt = runtime.conversion.readyAt, Date() >= readyAt {
-            diag.notice("completing pending request on key event id=\(self.diagID, privacy: .public) request=\(request.id, privacy: .public)")
+            DiagnosticLog.record(.resultFlushedOnKey)
             let panelWasVisible = runtime.candidates.shouldBeVisible
             finishRequest(NSNumber(value: request.id), using: input)
             // この反映で候補窓が開いたなら、このキーの役目は果たされている。
             // 続けて同じキーを解釈すると、開いた窓を閉じて同じ要求をやり直してしまう。
             if !panelWasVisible, runtime.candidates.shouldBeVisible {
-                diag.notice("key consumed by flush that opened the candidate window")
+                DiagnosticLog.record(.candidateKeyConsumed)
                 runtime.lastConsumedAt = Date()
                 return true
             }
@@ -105,7 +95,7 @@ final class SumibiInputController: IMKInputController {
             switch keyCode {
             case 125?, 126?:
                 candidateWindow.move(by: keyCode == 125 ? 1 : -1)
-                diag.notice("candidate move key=\(keyCode ?? 0, privacy: .public) index=\(self.candidateWindow.selectedIndex, privacy: .public)")
+                DiagnosticLog.record(.candidateMoved, counters: [self.candidateWindow.selectedIndex])
                 runtime.lastConsumedAt = Date()
                 return true
             case 123?, 124?:
@@ -132,7 +122,7 @@ final class SumibiInputController: IMKInputController {
             }
         }
         guard let key = decoded else {
-            diag.notice("handle id=\(self.diagID, privacy: .public) decode=nil")
+            DiagnosticLog.record(.keyHandled, counters: [state.marked.count])
             if state.pending != nil { cancelForTargetChange() }
             return false
         }
@@ -143,7 +133,7 @@ final class SumibiInputController: IMKInputController {
             runtime.selectionRange = selection.range
             let consumed = apply(effects, to: input)
             if consumed { runtime.lastConsumedAt = Date() }
-            diag.notice("convert selection length=\(selection.text.count, privacy: .public) effects=\(effects.count, privacy: .public)")
+            DiagnosticLog.record(.selectionConversionStarted, counters: [selection.text.count])
             return consumed
         }
         let wasPending = state.pending != nil
@@ -153,7 +143,7 @@ final class SumibiInputController: IMKInputController {
         // 「かな」キーは変換するものがなくても入力先へ渡さない。ABC配列の入力先では意味を持たない。
         let result = apply(effects, to: input) || keyCode == Self.kanaKeyCode
         if result { runtime.lastConsumedAt = Date() }
-        diag.notice("handle id=\(self.diagID, privacy: .public) effects=\(effects.count) markedAfter=\(self.state.marked.count) consumed=\(result)")
+        DiagnosticLog.record(.keyHandled, counters: [state.marked.count])
         return result
     }
 
@@ -175,7 +165,7 @@ final class SumibiInputController: IMKInputController {
             runtime.commandTapTimer = nil
             let tap = !held && CommandTap.isTap(duration: duration, onlyCommand: flags == .command,
                                                 otherInput: Self.inputCounts() != counts)
-            diag.notice("right command released tap=\(tap, privacy: .public) held=\(held, privacy: .public) duration=\(Int(duration * 1000), privacy: .public)ms")
+            DiagnosticLog.record(.commandTap)
             guard tap, !isExcluded(input), input.selectedRange().location != NSNotFound else { return }
             _ = process(.convert, keyCode: nil, in: input)
         }
@@ -194,7 +184,7 @@ final class SumibiInputController: IMKInputController {
     }
 
     override func commitComposition(_ sender: Any!) {
-        diag.notice("commitComposition id=\(self.diagID, privacy: .public) marked=\(self.state.marked.count) isIMKTextInput=\(sender is IMKTextInput)")
+        DiagnosticLog.record(.compositionCommitted)
         guard let input = sender as? IMKTextInput, !isExcluded(input) else { return }
         // 確定直後にも未確定文字列なしで呼ばれる。そのとき直前の変換結果と置換位置を消すと、2回目の変換ができなくなる。
         guard !state.marked.isEmpty, !runtime.originalCommitted else { return }
@@ -203,7 +193,7 @@ final class SumibiInputController: IMKInputController {
     }
 
     override func deactivateServer(_ sender: Any!) {
-        diag.notice("deactivateServer id=\(self.diagID, privacy: .public) marked=\(self.state.marked.count) isIMKTextInput=\(sender is IMKTextInput)")
+        DiagnosticLog.record(.controllerDeactivated)
         // 対象外のアプリには何も書いていない。ここで状態を消すと、次に移った先の入力を壊しうる。
         if isExcluded(sender) {
             super.deactivateServer(sender)
@@ -215,7 +205,7 @@ final class SumibiInputController: IMKInputController {
             // 自前の候補窓はIMKの管理外だが、アプリの非アクティブ化で隠れた場合に備えて出し直す。
             if runtime.candidates.shouldBeVisible, !candidateWindow.isVisible {
                 candidateWindow.reshow()
-                diag.notice("candidate window re-shown id=\(self.diagID, privacy: .public)")
+                DiagnosticLog.record(.candidatesReshown)
             }
             return
         }
@@ -234,7 +224,7 @@ final class SumibiInputController: IMKInputController {
         hideCandidatePanel()
         guard state.candidateStrings.indices.contains(index), let input = input ?? liveInput() else { return }
         let effects = candidateWindow.choose(at: index, session: state, canReplacePrevious: validatesPrevious(in: input))
-        diag.notice("chooseCandidate index=\(index, privacy: .public) effects=\(effects.count, privacy: .public)")
+        DiagnosticLog.record(.candidateChosen, counters: [index, effects.count])
         _ = apply(effects, to: input)
     }
 
@@ -310,8 +300,9 @@ final class SumibiInputController: IMKInputController {
         guard let request = state.pending, request.id == number.intValue else { return }
         guard let input = explicit ?? liveInput() else {
             let shouldRetry = runtime.conversion.recordUnavailableClient()
-            diag.notice("finishRequest: no live client (retry \(self.runtime.conversion.retryCount, privacy: .public))")
+            DiagnosticLog.record(.deliveryRetried, counters: [runtime.conversion.retryCount])
             if !shouldRetry {
+                DiagnosticLog.record(.deliveryUnavailable)
                 runtime.feedback.report(.inputUnavailable)
                 cancelForTargetChange()
             } else {
@@ -320,15 +311,14 @@ final class SumibiInputController: IMKInputController {
             return
         }
         let selection = input.selectedRange()
-        let marked = input.markedRange()
-        diag.notice("finishRequest: selected=\(selection.location, privacy: .public),\(selection.length, privacy: .public) marked=\(marked.location, privacy: .public),\(marked.length, privacy: .public) target=\(self.pendingTarget?.selection.location ?? -1, privacy: .public),\(self.pendingTarget?.selection.length ?? -1, privacy: .public)")
+        DiagnosticLog.record(.deliveryRangeChecked, counters: [selection.location, selection.length])
         runtime.replacement.reanchorIfCaretLagged(request, in: ReplacementInput(input))
         if !runtime.replacement.validatesPendingTarget(request, in: ReplacementInput(input)) {
             runtime.replacement.reportTargetMismatch(in: ReplacementInput(input))
             runtime.replacement.reanchorAtCaret(request, in: ReplacementInput(input))
         }
         guard runtime.replacement.validatesPendingTarget(request, in: ReplacementInput(input)) else {
-            diag.notice("finishRequest: target validation failed")
+            DiagnosticLog.record(.targetChanged)
             cancelForTargetChange()
             return
         }
@@ -407,8 +397,7 @@ final class SumibiInputController: IMKInputController {
         InputEffectApplier(runtime: runtime,
                        startConversion: { [self] id, request in startConversion(id: id, request: request) },
                        pokeClient: { [self] _ in pokeClient(input) },
-                       selectCandidate: { [weak self] index in self?.chooseCandidate(at: index, in: nil) },
-                       diagnoseText: DevelopmentOptions.current.diagnoseText)
+                       selectCandidate: { [weak self] index in self?.chooseCandidate(at: index, in: nil) })
         .apply(effects, to: IMKInputClient(input))
     }
 
@@ -417,7 +406,7 @@ final class SumibiInputController: IMKInputController {
         let range = input.selectedRange()
         guard range.location != NSNotFound, range.length > 0 else { return nil }
         guard let text = input.attributedSubstring(from: range)?.string, !text.isEmpty else {
-            diag.notice("selection could not be read length=\(range.length, privacy: .public)")
+            DiagnosticLog.record(.selectionUnreadable)
             runtime.feedback.report(.selectionUnreadable)
             return nil
         }
@@ -434,7 +423,7 @@ final class SumibiInputController: IMKInputController {
         // marked(既定): 文書を変えない空の未確定文字列のみ。insert: 空文字の挿入のみ。both: 両方。off: 何もしない。
         let style = DevelopmentOptions.current.pokeStyle
         guard style != "off", let input else {
-            diag.notice("poke skipped style=\(style, privacy: .public)")
+            DiagnosticLog.record(.clientPokeSkipped)
             return
         }
         let caret = input.selectedRange()
@@ -448,7 +437,7 @@ final class SumibiInputController: IMKInputController {
         if style == "insert" || style == "both" {
             input.insertText("", replacementRange: NSRange(location: caret.location, length: caret.length))
         }
-        diag.notice("poke client style=\(style, privacy: .public) at \(caret.location, privacy: .public),\(caret.length, privacy: .public)")
+        DiagnosticLog.record(.clientPoked)
     }
 
     /// 応答が返っていて、このコントローラーの入力先が生きていれば、保留中の変換を完了させる。
@@ -456,7 +445,7 @@ final class SumibiInputController: IMKInputController {
         guard let request = state.pending, let readyAt = runtime.conversion.readyAt, Date() >= readyAt,
               let input = client() as (any IMKTextInput)?, !isExcluded(input),
               input.selectedRange().location != NSNotFound else { return }
-        diag.notice("completing pending request on \(reason, privacy: .public) id=\(self.diagID, privacy: .public) request=\(request.id, privacy: .public)")
+        DiagnosticLog.record(.resultFlushed)
         finishRequest(NSNumber(value: request.id), using: input)
     }
 
@@ -490,7 +479,7 @@ final class SumibiInputController: IMKInputController {
     private func leaveForExcludedApplication() {
         let active = state.pending != nil || !state.marked.isEmpty || state.previous != nil || runtime.candidates.shouldBeVisible
         guard active else { return }
-        diag.notice("excluded application: ending the current input id=\(self.diagID, privacy: .public)")
+        DiagnosticLog.record(.excludedApplication)
         cancelForTargetChange()
     }
 

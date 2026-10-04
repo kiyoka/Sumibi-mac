@@ -1,8 +1,6 @@
 import AppKit
 import ServiceManagement
-import os
 
-private let log = Logger(subsystem: "org.sumibi.inputmethod.Sumibi", category: "menubar")
 
 /// メニューバーに常時表示するSumibiアイコンと、その下に出すメニュー。
 ///
@@ -63,7 +61,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     /// テンプレートにしておけば、明るいメニューバーでは黒、暗いメニューバーでは白で描かれる。
     private static func icon(indicator: ConversionFeedback.Indicator) -> NSImage? {
         guard let image = Bundle.main.image(forResource: "MenuBarIcon") else {
-            log.error("MenuBarIcon is missing from the bundle")
+            DiagnosticLog.record(.iconMissing)
             return nil
         }
         image.size = NSSize(width: 18, height: 18)
@@ -132,9 +130,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
                 UserDefaults.standard.set(false, forKey: Self.loginItemOptOutKey)
             }
         } catch {
-            log.error("login item toggle failed: \(error.localizedDescription, privacy: .public)")
+            DiagnosticLog.record(.loginToggleFailed)
         }
-        log.notice("login item status=\(service.status.rawValue, privacy: .public)")
+        DiagnosticLog.record(.loginStatus)
     }
 
     /// 初回はログイン項目へ登録する。利用者がメニューやシステム設定で切った場合は登録し直さない。
@@ -143,14 +141,14 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         // 一度も登録していないアプリでも`.notFound`が返ることがあるため、登録済み以外は登録を試す。
         guard service.status == .notRegistered || service.status == .notFound,
               !UserDefaults.standard.bool(forKey: Self.loginItemOptOutKey) else {
-            log.notice("login item status=\(service.status.rawValue, privacy: .public)")
+            DiagnosticLog.record(.loginStatus)
             return
         }
         do {
             try service.register()
         } catch {
-            log.error("login item register failed: \(String(describing: error), privacy: .public)")
+            DiagnosticLog.record(.loginRegistrationFailed)
         }
-        log.notice("login item registered status=\(service.status.rawValue, privacy: .public)")
+        DiagnosticLog.record(.loginRegistered)
     }
 }
