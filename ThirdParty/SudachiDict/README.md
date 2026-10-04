@@ -1,6 +1,6 @@
 # SudachiDict Core-derived candidate index
 
-`Prototype/Resources/SudachiCandidates.tsv` is derived from SudachiDict Core
+`App/Resources/SudachiCandidates.tsv` is derived from SudachiDict Core
 version **20260723** (the `small_lex.csv` and `core_lex.csv` sources). It is not
 covered by Sumibi's MIT license. SudachiDict is distributed under Apache License
 2.0; retain `LICENSE-2.0.txt` and `LEGAL` with the application bundle.
@@ -20,7 +20,7 @@ Regenerate with:
 python3 Scripts/generate_sudachi_candidates.py \
   --small /path/to/small_lex.zip \
   --core /path/to/core_lex.zip \
-  --output Prototype/Resources/SudachiCandidates.tsv
+  --output App/Resources/SudachiCandidates.tsv
 ```
 
 The generator keeps common nouns with a kanji-containing surface and a

@@ -1,25 +1,29 @@
 // swift-tools-version: 6.2
 import PackageDescription
+import Foundation
+
+// Opt-in only: release/debug configurations alone never enable experimental code.
+let developmentFeatures = ProcessInfo.processInfo.environment["SUMIBI_DEVELOPMENT_FEATURES"] == "1"
 
 let package = Package(
-    name: "SumibiInputPrototype",
+    name: "Sumibi",
     platforms: [.macOS(.v26)],
     products: [
-        .library(name: "SumibiPrototypeCore", targets: ["SumibiPrototypeCore"]),
-        .executable(name: "SumibiPrototypeIME", targets: ["SumibiPrototypeIME"])
+        .library(name: "SumibiCore", targets: ["SumibiCore"]),
+        .executable(name: "SumibiIME", targets: ["SumibiIME"])
     ],
     targets: [
-        .target(name: "SumibiPrototypeCore"),
+        .target(name: "SumibiCore"),
         .executableTarget(
-            name: "SumibiPrototypeIME",
-            dependencies: ["SumibiPrototypeCore"],
-            swiftSettings: [.swiftLanguageMode(.v5)],
+            name: "SumibiIME",
+            dependencies: ["SumibiCore"],
+            swiftSettings: [.swiftLanguageMode(.v5)] + (developmentFeatures ? [.define("SUMIBI_DEVELOPMENT")] : []),
             linkerSettings: [.linkedFramework("AppKit"), .linkedFramework("InputMethodKit")]
         ),
-        .testTarget(name: "SumibiPrototypeCoreTests", dependencies: ["SumibiPrototypeCore"]),
+        .testTarget(name: "SumibiCoreTests", dependencies: ["SumibiCore"]),
         .testTarget(
-            name: "SumibiPrototypeIMETests",
-            dependencies: ["SumibiPrototypeIME"],
+            name: "SumibiIMETests",
+            dependencies: ["SumibiIME"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         )
     ]
