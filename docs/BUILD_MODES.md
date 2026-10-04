@@ -1,5 +1,8 @@
 # 製品コードと開発機能
 
+診断ログの切替は通常版・開発版で共通。[診断ログ](DIAGNOSTIC_LOGGING.md)を参照。
+旧`PrototypeDiagnoseText`は#14で廃止し、どのモードでも入力文字列を記録しない。
+
 ## 命名・配置
 
 | 対象 | 現在の名前・配置 |
@@ -40,7 +43,6 @@ ruby Development/verify-build.rb development .build/development/Sumibi.app
 | 設定キー（互換のため旧名を維持） | 開発版の既定値 | 指定できる値 |
 | --- | --- | --- |
 | `PrototypeResponseMode` | `api` | `api`、`success`、`slow`、`failure`、`timeout` |
-| `PrototypeDiagnoseText` | false | trueで入力内容・周辺文字列を診断ログへ出す |
 | `PrototypePokeStyle` | `marked` | `marked`、`insert`、`both`、`off` |
 
 未知の値は安全な既定値へ戻す。模擬応答は実通信しないが、`api`は実通信する。入力内容の診断は秘密情報を含み得るため通常利用では有効にしない。設定は`org.sumibi.inputmethod.Sumibi`へ保存し、開発版だけが読み取る。例：

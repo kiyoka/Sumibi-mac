@@ -1,8 +1,6 @@
 import Foundation
 import SumibiCore
-import os
 
-private let diag = Logger(subsystem: "org.sumibi.inputmethod.Sumibi", category: "diag")
 
 /// A result may outlive the controller which requested it, until a live client is available.
 enum PendingOutcome: Equatable {
@@ -49,11 +47,11 @@ final class ConversionLifecycle {
                     case .first: self.outcome = .first(result.candidates.first ?? "")
                     case .alternatives: self.outcome = .alternatives(result)
                     }
-                    diag.notice("conversion succeeded id=\(id) candidates=\(result.candidates.count)")
+                    DiagnosticLog.record(.conversionSucceeded, counters: [id, result.candidates.count])
                 case .failure(let error):
                     self.outcome = .failure(error)
                     self.feedback?.report(.failure(error))
-                    diag.notice("conversion failed id=\(id) retryable=\(error.isRetryable)")
+                    DiagnosticLog.conversionFailed(error)
                 }
                 self.readyAt = Date()
                 onReady(id)
@@ -74,7 +72,7 @@ final class ConversionLifecycle {
         timer?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.requestID == id, self.session.pending?.id == id else { return }
-            diag.notice("finish timer id=\(id) retry=\(self.retryCount)")
+            DiagnosticLog.record(.deliveryTimer, counters: [id, self.retryCount])
             finish(id)
         }
         timer = work

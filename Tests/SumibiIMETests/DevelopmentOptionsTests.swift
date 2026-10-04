@@ -14,7 +14,6 @@ final class DevelopmentOptionsTests: XCTestCase {
     func testEmptyPreferencesAlwaysUseSafeDefaults() {
         let options = DevelopmentOptions(defaults: defaults())
         XCTAssertEqual(options.responseMode, "api")
-        XCTAssertFalse(options.diagnoseText)
         XCTAssertEqual(options.pokeStyle, "marked")
     }
 
@@ -25,7 +24,6 @@ final class DevelopmentOptionsTests: XCTestCase {
         defaults.set("insert", forKey: "PrototypePokeStyle")
         let options = DevelopmentOptions(defaults: defaults)
         XCTAssertEqual(options.responseMode, DevelopmentOptions.isEnabled ? "success" : "api")
-        XCTAssertEqual(options.diagnoseText, DevelopmentOptions.isEnabled)
         XCTAssertEqual(options.pokeStyle, DevelopmentOptions.isEnabled ? "insert" : "marked")
     }
 

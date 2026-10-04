@@ -1,9 +1,7 @@
 import AppKit
 import InputMethodKit
 import SumibiCore
-import os
 
-private let diag = Logger(subsystem: "org.sumibi.inputmethod.Sumibi", category: "diag")
 
 /// Window boundary used by the presenter; a test double requires no NSApplication/window.
 protocol CandidateDisplaying: AnyObject {
@@ -35,7 +33,7 @@ final class CandidatePresenter {
         let rect = lineRectNearCaret(in: input) ?? lastLineRect
         let topLeft = rect.map { NSPoint(x: $0.minX, y: $0.minY) } ?? NSEvent.mouseLocation
         show(candidates: candidates, topLeft: topLeft, onSelect: onSelect)
-        diag.notice("showCandidates count=\(candidates.count, privacy: .public) visible=\(self.isVisible, privacy: .public) anchor=\(rect.map { NSStringFromRect($0) } ?? "none", privacy: .public) topLeft=\(NSStringFromPoint(topLeft), privacy: .public)")
+        DiagnosticLog.record(.candidatesShown, counters: [candidates.count])
     }
 
     func show(candidates: [String], topLeft: NSPoint, onSelect: @escaping (Int) -> Void) {
@@ -63,7 +61,7 @@ final class CandidatePresenter {
         guard session.candidateStrings.indices.contains(index) else { return [] }
         let effects = session.chooseCandidate(session.candidateStrings[index], canReplacePrevious: canReplacePrevious,
                                              keepCandidates: true)
-        diag.notice("cycleCandidate index=\(index, privacy: .public) effects=\(effects.count, privacy: .public)")
+        DiagnosticLog.record(.candidateCycled, counters: [index, effects.count])
         guard !effects.isEmpty else {
             hide()
             return []

@@ -23,8 +23,11 @@ expected.each { |key, value| abort "Unexpected #{key}" unless read.call(key) == 
 binary = File.join(app, 'Contents', 'MacOS', 'Sumibi')
 contents = File.binread(binary)
 # These strings exist only in gated implementations, not ordinary diagnostic logging.
-markers = %w[PrototypeResponseMode PrototypeDiagnoseText PrototypePokeStyle] +
-  ['text: expected=[', 'text: after commit caret=', 'text: before caret ']
+markers = %w[PrototypeResponseMode PrototypePokeStyle]
+# No build may retain the old raw-text logging implementation.
+['PrototypeDiagnoseText', 'text: expected=[', 'text: after commit caret=', 'text: before caret '].each do |marker|
+  abort "Forbidden text logging marker #{marker}" if contents.include?(marker.b)
+end
 markers.each do |marker|
   present = contents.include?(marker.b)
   abort "Unexpected development marker #{marker} (#{mode})" unless present == (mode == 'development')
