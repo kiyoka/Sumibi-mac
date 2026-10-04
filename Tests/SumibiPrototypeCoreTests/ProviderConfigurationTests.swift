@@ -35,8 +35,15 @@ final class ProviderConfigurationTests: XCTestCase {
 
     func testMaskedDisplayKeepsOnlyTheLastFourCharacters() {
         XCTAssertNil(APIKeyDisplay.masked(for: ""))
-        XCTAssertEqual(APIKeyDisplay.masked(for: "abc"), "•••")
-        XCTAssertEqual(APIKeyDisplay.masked(for: "sk-12345678"), "•••••••5678")
+        XCTAssertEqual(APIKeyDisplay.masked(for: "abc"), "****")
+        XCTAssertEqual(APIKeyDisplay.masked(for: "1234"), "****")
+        XCTAssertEqual(APIKeyDisplay.masked(for: "sk-12345678"), "****5678")
+    }
+
+    func testLongAPIKeyMaskIsFixedWidthAndNeverIncludesItsPrefix() {
+        let key = "sk-" + String(repeating: "x", count: 200) + "AB12"
+        XCTAssertEqual(APIKeyDisplay.masked(for: key), "****AB12")
+        XCTAssertEqual(APIKeyDisplay.masked(for: key)?.count, 8)
     }
 
     func testAPIKeyWithWhitespaceIsNotAcceptable() {

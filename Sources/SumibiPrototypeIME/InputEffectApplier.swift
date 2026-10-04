@@ -10,11 +10,12 @@ private let diag = Logger(subsystem: "org.sumibi.inputmethod.Sumibi", category: 
 struct InputEffectApplier {
     let runtime: PrototypeRuntime
     let startConversion: (Int, ConversionRequest) -> Void
-    let pokeClient: ((any IMKTextInput)?) -> Void
+    let pokeClient: (any InputClient) -> Void
     let selectCandidate: (Int) -> Void
+    var diagnoseText = false
     private var state: InputSession { runtime.state }
 
-    func apply(_ effects: [SessionEffect], to input: IMKTextInput) -> Bool {
+    func apply(_ effects: [SessionEffect], to input: any InputClient) -> Bool {
         var passToClient = false
         for effect in effects {
             switch effect {
@@ -23,8 +24,7 @@ struct InputEffectApplier {
                                     replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
                 let markedStart = input.markedRange().location
                 if markedStart != NSNotFound {
-                    var rect = NSRect.zero
-                    _ = input.attributes(forCharacterIndex: markedStart, lineHeightRectangle: &rect)
+                    let rect = input.lineRect(at: markedStart)
                     if rect.height > 0 { runtime.candidates.lastLineRect = rect }
                 }
             case .commit(let text):
@@ -55,7 +55,7 @@ struct InputEffectApplier {
                     runtime.replacement.anchor = nil
                 }
                 runtime.replacement.pendingTarget = PendingTarget(requestID: id, selection: caret, expectedText: source, kind: .first)
-                if UserDefaults.standard.bool(forKey: "PrototypeDiagnoseText"), caret.location != NSNotFound {
+                if diagnoseText, caret.location != NSNotFound {
                     let start = max(0, caret.location - source.utf16.count - 40)
                     let around = input.attributedSubstring(from: NSRange(location: start, length: caret.location - start))?.string ?? "(nil)"
                     diag.notice("text: after commit caret=\(caret.location, privacy: .public) \(start, privacy: .public)..<\(caret.location, privacy: .public)=[\(around.replacingOccurrences(of: "\n", with: "\\n"), privacy: .public)]")

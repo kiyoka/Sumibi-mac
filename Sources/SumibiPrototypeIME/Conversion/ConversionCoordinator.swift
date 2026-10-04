@@ -5,8 +5,19 @@ import SumibiPrototypeCore
 ///
 /// 送信の前に、APIキーの有無とデータ送信への同意を確かめる。どちらか欠けていれば通信しない。
 struct ConversionCoordinator {
-    private let settings = SettingsStore()
-    private let keys = APIKeyStore()
+    private let settings: SettingsStore
+    private let keys: APIKeyStore
+    private let readResponseMode: () -> String
+    private let makeClient: (OpenAICompatibleConfiguration) -> any ConversionService
+
+    init(settings: SettingsStore = SettingsStore(), keys: APIKeyStore = APIKeyStore(),
+         responseMode: @escaping () -> String = { ConversionCoordinator.responseMode },
+         makeClient: @escaping (OpenAICompatibleConfiguration) -> any ConversionService = { OpenAICompatibleClient(configuration: $0) }) {
+        self.settings = settings
+        self.keys = keys
+        readResponseMode = responseMode
+        self.makeClient = makeClient
+    }
 
     private static let homophoneDictionary: HomophoneDictionary? = {
         guard let url = Bundle.main.url(forResource: "SudachiCandidates", withExtension: "tsv") else { return nil }
@@ -22,7 +33,7 @@ struct ConversionCoordinator {
     static var usesMock: Bool { responseMode != "api" }
 
     func service() throws -> any ConversionService {
-        switch Self.responseMode {
+        switch readResponseMode() {
         case "success": return MockConversionService(delay: 0.6, succeeds: true)
         case "slow": return MockConversionService(delay: 5.0, succeeds: true)
         case "failure": return MockConversionService(delay: 0.6, succeeds: false)
@@ -40,8 +51,8 @@ struct ConversionCoordinator {
         guard settings.hasConsent(for: configuration.endpoint) else {
             throw ConversionError.consentMissing
         }
-        return OpenAICompatibleClient(
-            configuration: OpenAICompatibleConfiguration(
+        return makeClient(
+            OpenAICompatibleConfiguration(
                 endpoint: endpoint,
                 model: configuration.model,
                 apiKey: apiKey

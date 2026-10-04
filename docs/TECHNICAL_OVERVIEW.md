@@ -442,7 +442,7 @@ API設定（APIのURL、モデル名、APIキー）は実装済みである。
 - 入口: メニューバーのSumibiアイコンと、IMEメニューの「Sumibi設定…」。IMEは`LSUIElement`のアプリのため、ウィンドウを出す直前に活性化ポリシーを`.accessory`へ切り替えて前面に出す。
 - APIのURLとモデル名: `UserDefaults`のキー`providerConfiguration`へJSONで保存する。項目名と既定値はiOS版の`ProviderConfiguration`に合わせる。
 - APIキー: Keychainの汎用パスワード。サービス名`org.sumibi.Sumibi-mac.api-key`、アカウント`default`、`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`、iCloud同期なし。サービス名をバンドル識別子から作らないのは、識別子を変えたときに保存済みのキーを失わないためである。
-- 画面にはキーそのものを出さず、末尾4文字だけを残した伏せ字を表示する。
+- 画面にはキーそのものを出さず、固定長の`****`と末尾4文字だけを表示する。4文字以下のキーは全体を隠す。「変更」で別の空の入力欄を開き、新しいキーを入力して保存する。キャンセルでは既存のキーを変更せず、伏せ字をキーとして保存しない。
 - APIのURLは`https`を必須とし、`http`は`localhost`・`127.0.0.1`・`::1`に限って許す。手元で動かすLLMサーバーを試せるようにするためである。
 - 開発中に画面だけを確認する場合は、アプリを`--settings`付きで起動する。入力メソッドとしては動かず、設定ウィンドウだけを開く。
 
