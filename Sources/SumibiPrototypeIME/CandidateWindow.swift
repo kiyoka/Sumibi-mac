@@ -5,7 +5,7 @@ import AppKit
 /// macOS 27では、IMEが消費したキーごとに入力セッションが終了するため、`IMKCandidates`の
 /// 選択API(`selectCandidate(withIdentifier:)`、`selectedCandidateString()`)が機能しない。
 /// キーボードでの候補選択を成立させるため、描画と選択状態を自分で持つ。
-final class CandidateWindow {
+final class CandidateWindow: CandidateDisplaying {
     private let panel: NSPanel
     private let list: CandidateListView
     /// 候補が確定されたときに呼ばれる。引数は候補の位置。
