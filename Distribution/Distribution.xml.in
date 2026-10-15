@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<installer-gui-script minSpecVersion="2">
+    <title>Sumibi</title>
+    <options customize="never" require-scripts="false" hostArchitectures="@ARCHITECTURES@"/>
+    <domains enable_anywhere="false" enable_currentUserHome="true" enable_localSystem="false"/>
+    <allowed-os-versions><os-version min="@MIN_OS@"/></allowed-os-versions>
+    <choices-outline><line choice="sumibi"/></choices-outline>
+    <choice id="sumibi" title="Sumibi"><pkg-ref id="org.sumibi.inputmethod.Sumibi.user"/></choice>
+    <pkg-ref id="org.sumibi.inputmethod.Sumibi.user" version="@BUILD@" onConclusion="None">Sumibi-component.pkg</pkg-ref>
+</installer-gui-script>
