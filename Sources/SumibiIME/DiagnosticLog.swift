@@ -67,4 +67,21 @@ enum DiagnosticLog {
     static func conversionFailed(_ error: ConversionError) {
         reporter.record(.conversionFailed, reason: DiagnosticFailure(error))
     }
+
+    static func decisionsFailed(_ error: DecisionsError) {
+        let reason: DiagnosticFailure
+        switch error {
+        case .missingKey: reason = .apiKeyMissing
+        case .invalidSettings, .unsupportedProvider: reason = .invalidEndpoint
+        case .invalidResponse, .refused: reason = .emptyResponse
+        case .authentication: reason = .invalidCredentials
+        case .rateLimited, .requestLimit: reason = .rateLimited
+        case .server: reason = .serverError
+        case .http: reason = .httpError
+        case .timedOut: reason = .timedOut
+        case .offline: reason = .offline
+        case .network: reason = .network
+        }
+        reporter.record(.decisionsFailed, reason: reason)
+    }
 }

@@ -3,6 +3,128 @@ import SumibiCore
 @testable import SumibiIME
 
 final class ConversionFeedbackTests: XCTestCase {
+    func testLongSourceReadFailuresExplainAppLimitCodexAndPracticalWorkaround() {
+        for count in [100, 120, 121] {
+            let notices = [
+                ConversionNotice.delivery(.sourceUnavailable, stage: .targetValidation, sourceCharacters: count, sourceUTF16: count),
+                ConversionNotice.ambientDelivery(.committedSourceUnavailable, sourceCharacters: count, sourceUTF16: count)
+            ]
+            for notice in notices {
+                XCTAssertEqual(notice.explanations, LongInputGuidance.explanations)
+                XCTAssertTrue(notice.explanations.joined().contains("100文字以上"))
+                XCTAssertTrue(notice.explanations.joined().contains("場合があります"))
+                XCTAssertTrue(notice.explanations.joined().contains("Codex"))
+                XCTAssertTrue(notice.explanations.joined().contains("変換対象だけを選択"))
+                XCTAssertEqual(notice.advice, LongInputGuidance.advice)
+            }
+        }
+        let partial = ConversionNotice.delivery(.lengthMismatch(expected: 121, actual: 100),
+            stage: .replacement, sourceCharacters: 121, sourceUTF16: 121)
+        XCTAssertEqual(partial.explanations, LongInputGuidance.explanations)
+    }
+
+    func testLongInputAdviceDoesNotMislabelShortTextOtherFailuresOrWrittenResults() {
+        let short = ConversionNotice.delivery(.sourceUnavailable, stage: .targetValidation, sourceCharacters: 99, sourceUTF16: 198)
+        XCTAssertTrue(short.explanations.isEmpty)
+        XCTAssertTrue(ConversionNotice.ambientDelivery(.committedSourceUnavailable, sourceCharacters: 2, sourceUTF16: 2).explanations.isEmpty)
+        for failure in [ReplacementValidationFailure.sourceMismatch, .trackingUnavailable, .rangeUnavailable,
+                        .lengthMismatch(expected: 121, actual: 122)] {
+            let notice = ConversionNotice.delivery(failure, stage: .targetValidation, sourceCharacters: 121, sourceUTF16: 121)
+            XCTAssertTrue(notice.explanations.isEmpty)
+        }
+        XCTAssertTrue(ConversionNotice.failure(.timedOut).explanations.isEmpty)
+        let written = ConversionNotice.resultConfirmation(.unavailable, sourceCharacters: 121, sourceUTF16: 121, expectedUTF16: 110)
+        XCTAssertTrue(written.advice.contains("再変換せず"))
+        XCTAssertTrue(written.explanations.isEmpty)
+    }
+
+    func testDeliveryNoticesContainStageAndCountsButNoSourceOrResponses() {
+        let source = String(repeating: "😀", count: 99)
+        let notice = ConversionNotice.delivery(.lengthMismatch(expected: 198, actual: 100),
+            stage: .targetValidation, sourceCharacters: source.count, sourceUTF16: source.utf16.count)
+        XCTAssertEqual(notice.stage, ConversionDeliveryStage.targetValidation.rawValue)
+        XCTAssertTrue(notice.details?.contains("99文字／UTF-16 198") ?? false)
+        XCTAssertTrue(notice.details?.contains("要求 198／取得 100") ?? false)
+        XCTAssertFalse([notice.title, notice.message, notice.advice, notice.details ?? ""].joined().contains("😀"))
+        XCTAssertTrue(notice.message.contains("未特定"))
+    }
+
+    func testApiAndReadbackFailuresHaveDifferentStagesAndSafeRemedies() {
+        XCTAssertNotEqual(ConversionNotice.failure(.apiKeyMissing).stage, ConversionNotice.failure(.timedOut).stage)
+        for readback in [ConversionResultReadback.unavailable, .lengthMismatch(100), .mismatch] {
+            let notice = ConversionNotice.resultConfirmation(readback, sourceCharacters: 201, sourceUTF16: 201, expectedUTF16: 110)
+            XCTAssertEqual(notice.stage, ConversionDeliveryStage.resultVerification.rawValue)
+            XCTAssertTrue(notice.advice.contains("再変換せず"))
+            XCTAssertFalse(notice.message.contains("接続"))
+        }
+    }
+
+    func testOnlyNewErrorsInvokeCaretCueCallbackAndClearingPreservesInput() {
+        let runtime = InputRuntime()
+        _ = runtime.state.receive(.text("sample"))
+        var cues = 0
+        runtime.feedback.onNotice = { cues += 1 }
+        runtime.feedback.begin()
+        runtime.feedback.report(.failure(.timedOut))
+        XCTAssertEqual(cues, 1)
+        runtime.feedback.finish()
+        runtime.feedback.clearNotice()
+        XCTAssertEqual(cues, 1)
+        XCTAssertEqual(runtime.state.marked, "sample")
+        runtime.feedback.report(.failure(.timedOut))
+        XCTAssertEqual(cues, 2)
+        XCTAssertEqual(runtime.feedback.notice, .failure(.timedOut))
+        XCTAssertEqual(runtime.state.marked, "sample")
+    }
+
+    func testAcceptedDecisionsDecisionChangesIndicatorAndRetainsNumericHistoryAfterFinish() {
+        let feedback = ConversionFeedback()
+        feedback.begin()
+        feedback.recordDecisionsDecision(score: 0.8, threshold: 0.8)
+        XCTAssertEqual(feedback.indicator, .decisionsAccepted)
+        XCTAssertTrue(feedback.isDecisionsAccepted)
+        XCTAssertTrue(feedback.accessibilityLabel.contains("変換対象"))
+        XCTAssertEqual(feedback.lastDecisionsDecision?.score, 0.8)
+        XCTAssertTrue(feedback.lastDecisionsDecision?.summary.contains("0.800") ?? false)
+        feedback.finish()
+        XCTAssertEqual(feedback.indicator, .idle)
+        XCTAssertFalse(feedback.isDecisionsAccepted)
+        XCTAssertEqual(feedback.lastDecisionsDecision?.accepted, true)
+        feedback.begin() // A new/manual request is not already accepted by Decisions.
+        XCTAssertEqual(feedback.indicator, .converting)
+        feedback.clearDecisionsDecision()
+        XCTAssertNil(feedback.lastDecisionsDecision)
+    }
+
+    func testBelowThresholdAndInvalidScoresNeverShowAcceptedIndicator() {
+        let feedback = ConversionFeedback()
+        feedback.begin()
+        feedback.recordDecisionsDecision(score: 0.799, threshold: 0.8)
+        XCTAssertEqual(feedback.indicator, .converting)
+        XCTAssertEqual(feedback.lastDecisionsDecision?.accepted, false)
+        XCTAssertTrue(feedback.lastDecisionsDecision?.summary.contains("0.799") ?? false)
+        let previous = feedback.lastDecisionsDecision
+        for invalid in [Double.nan, .infinity, -0.1, 1.1] {
+            feedback.recordDecisionsDecision(score: invalid, threshold: 0.8)
+            feedback.recordDecisionsDecision(score: 1, threshold: invalid)
+            XCTAssertEqual(feedback.lastDecisionsDecision, previous)
+            XCTAssertFalse(feedback.isDecisionsAccepted)
+        }
+    }
+
+    func testExistingErrorTakesPriorityOverAcceptedDecisionsIndicator() {
+        let feedback = ConversionFeedback()
+        feedback.begin()
+        feedback.recordDecisionsDecision(score: 1, threshold: 0.8)
+        feedback.report(.inputUnavailable)
+        XCTAssertEqual(feedback.indicator, .error)
+        XCTAssertTrue(feedback.isDecisionsAccepted)
+        feedback.clearNotice()
+        XCTAssertEqual(feedback.indicator, .decisionsAccepted)
+        feedback.finish()
+        XCTAssertEqual(feedback.indicator, .idle)
+    }
+
     func testIdleWaitingAndFinishIndicatorsDoNotRequireAcknowledgement() {
         let feedback = ConversionFeedback()
         XCTAssertEqual(feedback.indicator, .idle)
@@ -98,7 +220,10 @@ final class ConversionFeedbackTests: XCTestCase {
         XCTAssertEqual(feedback.notice, .failure(.timedOut))
         XCTAssertTrue(feedback.isConverting) // Delivery is still pending.
         XCTAssertEqual(session.marked, "original")
+        XCTAssertTrue(lifecycle.hasFailedOutcome(id: id))
+        XCTAssertFalse(lifecycle.hasFailedOutcome(id: id + 1))
         XCTAssertEqual(lifecycle.takeOutcome(id: id), .failure(.timedOut))
+        XCTAssertFalse(lifecycle.hasFailedOutcome(id: id))
         XCTAssertFalse(feedback.isConverting)
         XCTAssertEqual(feedback.indicator, .error)
     }

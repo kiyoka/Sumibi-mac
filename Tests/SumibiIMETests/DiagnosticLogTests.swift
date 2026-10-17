@@ -24,7 +24,7 @@ final class DiagnosticLogTests: XCTestCase {
         }
         for event in DiagnosticEvent.allCases { reporter.record(event, counters: [123, 456]) }
         XCTAssertEqual(events, DiagnosticEvent.allCases.filter(\.isFailure))
-        XCTAssertEqual(events.count, 8)
+        XCTAssertEqual(events.count, 9)
     }
 
     func testDetailsKeepFixedEventsAndIntegerMetadata() {

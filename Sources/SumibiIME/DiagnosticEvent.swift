@@ -43,11 +43,13 @@ enum DiagnosticEvent: String, CaseIterable {
     case loginRegistered
     case deliveryUnavailable
     case overLimit
+    case decisionsStarted, decisionsJudged, decisionsDiscarded, decisionsApplied, decisionsFailed
+    case committedSourceWaiting, committedSourceRetried, committedSourceConfirmed
 
     var isFailure: Bool {
         switch self {
         case .conversionFailed, .deliveryUnavailable, .targetChanged, .selectionUnreadable,
-             .iconMissing, .loginToggleFailed, .loginRegistrationFailed, .overLimit: true
+             .iconMissing, .loginToggleFailed, .loginRegistrationFailed, .overLimit, .decisionsFailed: true
         default: false
         }
     }

@@ -11,6 +11,10 @@ final class InputRuntime {
     let replacement = TextReplacementTracker()
     let feedback = ConversionFeedback()
     lazy var conversion = ConversionLifecycle(session: state, feedback: feedback)
+    lazy var resultVerifier = ConversionResultVerifier(feedback: feedback)
+    lazy var caretCue = CaretDecisionCue()
+    lazy var ambient = AmbientConversionLifecycle(feedback: feedback,
+        dismissCue: { [weak self] in self?.caretCue.hide() })
     lazy var candidates = CandidatePresenter()
     var rescuedText = ""
     var deferredControls: [String] = []
@@ -22,10 +26,46 @@ final class InputRuntime {
     var isEditingUserDictionary = false
     var selectionRange: NSRange?
     var originalCommitted = false
+    /// A committed-source read wait, not a manual request whose keys may be queued.
+    var awaitingAmbientSourceID: Int?
     var commandTapTimer: DispatchSourceTimer?
+
+    init() {
+        feedback.onNotice = { [weak self] in
+            guard let self, let controller = self.latest ?? self.lastHandler else { return }
+            controller.showCaretErrorCue()
+        }
+    }
+
+    static func isNavigationKey(_ keyCode: UInt16?) -> Bool {
+        switch keyCode {
+        case 123?, 124?, 125?, 126?, 115?, 119?, 116?, 121?: return true
+        default: return false
+        }
+    }
+
+    /// Run before flushing a ready conversion or forwarding movement to the client.
+    /// Some clients discard marked text on movement; commit the original first.
+    /// Candidate arrows belong to the candidate presenter, not document navigation.
+    func prepareForNavigation(keyCode: UInt16?) -> [SessionEffect]? {
+        guard Self.isNavigationKey(keyCode), !candidates.shouldBeVisible else { return nil }
+        let effects = cancelComposition()
+        _ = state.cancelForTargetChange(rescueMarked: false)
+        return effects
+    }
+
+    func cancelAmbientSourceWaitForInput() {
+        guard awaitingAmbientSourceID != nil else { return }
+        // The original is already committed. New keys must be handled normally,
+        // never queued behind the read-only wait or appended to the old source.
+        cancelForTargetChange(rescueMarked: false)
+    }
 
     /// Shared cancellation path used by the IMK adapter and fake-client regression tests.
     func cancelComposition() -> [SessionEffect] {
+        awaitingAmbientSourceID = nil
+        resultVerifier.cancel()
+        ambient.stop()
         let effects = state.cancelComposition(originalCommitted: originalCommitted)
         conversion.cancel()
         candidates.hide()
@@ -38,6 +78,9 @@ final class InputRuntime {
     }
 
     func cancelForTargetChange(rescueMarked: Bool = true) {
+        awaitingAmbientSourceID = nil
+        resultVerifier.cancel()
+        ambient.stop()
         conversion.cancel()
         candidates.hide()
         // Already committed originals stay in the old client; rescue only queued text.

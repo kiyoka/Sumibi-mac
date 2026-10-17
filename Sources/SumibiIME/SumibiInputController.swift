@@ -46,6 +46,7 @@ final class SumibiInputController: IMKInputController {
     override func handle(_ event: NSEvent, client sender: Any) -> Bool {
         // 対象外のアプリでは、どのキーも加工せず入力先へ渡す。`Control + J`もアプリ自身の操作として動く。
         if isExcluded(sender) {
+            runtime.ambient.stop()
             leaveForExcludedApplication()
             return false
         }
@@ -53,6 +54,8 @@ final class SumibiInputController: IMKInputController {
         runtime.lastHandler = self
         DiagnosticLog.record(.keyHandled, counters: [state.marked.count])
         if event.type == .flagsChanged {
+            runtime.cancelAmbientSourceWaitForInput()
+            runtime.ambient.stop()
             if let input = sender as? IMKTextInput { watchCommandTap(event, in: input) }
             return false
         }
@@ -62,7 +65,25 @@ final class SumibiInputController: IMKInputController {
 
     /// 解釈したキーを処理する。右Commandのタップは、キーコードなしの`Control + J`としてここへ来る。
     private func process(_ decoded: InputKey?, keyCode: UInt16?, in input: IMKTextInput) -> Bool {
+        runtime.cancelAmbientSourceWaitForInput()
+        runtime.resultVerifier.cancel()
         runtime.lastInput = input
+        let observationKey: String?
+        switch decoded {
+        case .text(let text): observationKey = text.last.map(String.init)
+        case .backspace?: observationKey = "BACKSPACE"
+        default: observationKey = nil
+        }
+        if observationKey == nil { runtime.ambient.stop() }
+        defer {
+            if let observationKey {
+                // IMK can recreate controllers after a consumed key. Observe using the newest
+                // live controller on the next main turn, not the just-retired sender.
+                DispatchQueue.main.async { [runtime] in
+                    (runtime.latest ?? runtime.lastHandler)?.observeAmbient(latestKey: observationKey)
+                }
+            }
+        }
         // 返っている応答を反映する前にEscを処理する。取消と結果の確定が競合しないようにする。
         if decoded == .cancel {
             if runtime.candidates.shouldBeVisible {
@@ -76,6 +97,12 @@ final class SumibiInputController: IMKInputController {
             runtime.lastConsumedAt = Date()
             DiagnosticLog.record(.compositionCancelled)
             return true
+        }
+        // Movement must not let the client discard the marked original, nor flush
+        // a just-ready result. Preserve the original before forwarding this event.
+        if let effects = runtime.prepareForNavigation(keyCode: keyCode) {
+            _ = apply(effects, to: input)
+            return false
         }
         // 応答は返っているのに、セッション終了で入力先へ書き込めなかった場合は、生きた入力先が確実にあるこの時点で完了させる。
         if let request = state.pending, let readyAt = runtime.conversion.readyAt, Date() >= readyAt {
@@ -188,6 +215,7 @@ final class SumibiInputController: IMKInputController {
         guard let input = sender as? IMKTextInput, !isExcluded(input) else { return }
         // 確定直後にも未確定文字列なしで呼ばれる。そのとき直前の変換結果と置換位置を消すと、2回目の変換ができなくなる。
         guard !state.marked.isEmpty, !runtime.originalCommitted else { return }
+        runtime.ambient.stop()
         input.insertText(state.marked, replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
         cancelForTargetChange(rescueMarked: false)
     }
@@ -196,6 +224,7 @@ final class SumibiInputController: IMKInputController {
         DiagnosticLog.record(.controllerDeactivated)
         // 対象外のアプリには何も書いていない。ここで状態を消すと、次に移った先の入力を壊しうる。
         if isExcluded(sender) {
+            runtime.ambient.stop()
             super.deactivateServer(sender)
             return
         }
@@ -221,6 +250,7 @@ final class SumibiInputController: IMKInputController {
 
     /// 自前の候補窓から候補が選ばれたときの処理。キーボードとマウスの両方から使う。
     private func chooseCandidate(at index: Int, in input: (any IMKTextInput)?) {
+        runtime.ambient.stop()
         hideCandidatePanel()
         guard state.candidateStrings.indices.contains(index), let input = input ?? liveInput() else { return }
         let effects = candidateWindow.choose(at: index, session: state, canReplacePrevious: validatesPrevious(in: input))
@@ -230,6 +260,7 @@ final class SumibiInputController: IMKInputController {
 
     /// 候補窓の次の候補へ移り、候補窓を開いたまま入力先の文字列をその候補に書き換える。最後の候補の次は先頭へ戻る。
     private func cycleCandidate(in input: IMKTextInput) {
+        runtime.ambient.stop()
         guard candidateWindow.count > 0 else { return }
         let effects = candidateWindow.cycle(session: state, canReplacePrevious: validatesPrevious(in: input))
         _ = apply(effects, to: input)
@@ -253,10 +284,23 @@ final class SumibiInputController: IMKInputController {
             item.isEnabled = false
             menu.addItem(item)
         }
+        if let reason = runtime.ambient.lastObservationBlock {
+            for text in ["自動変換の見送り：\(reason.rawValue)", runtime.ambient.lastObservationDetails].compactMap({ $0 }) {
+                let row = NSMenuItem(title: text, action: nil, keyEquivalent: "")
+                row.isEnabled = false
+                menu.addItem(row)
+            }
+        }
         if let notice = runtime.feedback.notice {
             let item = NSMenuItem(title: notice.title, action: nil, keyEquivalent: "")
             item.isEnabled = false
             menu.addItem(item)
+            for description in [notice.stage.map { "段階：\($0)" }, "原因：\(notice.message)",
+                                notice.details].compactMap({ $0 }) + notice.explanations.map({ "解説：\($0)" }) + ["対処：\(notice.advice)"] {
+                let row = NSMenuItem(title: description, action: nil, keyEquivalent: "")
+                row.isEnabled = false
+                menu.addItem(row)
+            }
         }
         return menu
     }
@@ -274,6 +318,7 @@ final class SumibiInputController: IMKInputController {
 
     /// ConversionLifecycle owns cancellation, ready results and retry scheduling.
     private func startConversion(id: Int, request: ConversionRequest) {
+        runtime.ambient.stop()
         let request = ConversionRequest(source: request.source, mode: request.mode,
                                         currentConversion: request.currentConversion,
                                         userDictionary: SettingsStore().loadUserDictionary())
@@ -303,7 +348,9 @@ final class SumibiInputController: IMKInputController {
             DiagnosticLog.record(.deliveryRetried, counters: [runtime.conversion.retryCount])
             if !shouldRetry {
                 DiagnosticLog.record(.deliveryUnavailable)
-                runtime.feedback.report(.inputUnavailable)
+                var notice = ConversionNotice.inputUnavailable
+                notice.details = "対象 \(request.source.count)文字／UTF-16 \(request.source.utf16.count)"
+                if !runtime.conversion.hasFailedOutcome(id: request.id) { runtime.feedback.report(notice) }
                 cancelForTargetChange()
             } else {
                 scheduleFinish(id: number.intValue, delay: 0.25, retry: true)
@@ -312,14 +359,15 @@ final class SumibiInputController: IMKInputController {
         }
         let selection = input.selectedRange()
         DiagnosticLog.record(.deliveryRangeChecked, counters: [selection.location, selection.length])
-        runtime.replacement.reanchorIfCaretLagged(request, in: ReplacementInput(input))
-        if !runtime.replacement.validatesPendingTarget(request, in: ReplacementInput(input)) {
-            runtime.replacement.reportTargetMismatch(in: ReplacementInput(input))
-            runtime.replacement.reanchorAtCaret(request, in: ReplacementInput(input))
-        }
-        guard runtime.replacement.validatesPendingTarget(request, in: ReplacementInput(input)) else {
+        if let failure = runtime.replacement.resolvePendingTarget(request, in: ReplacementInput(input)) {
+            let shouldReport = !failure.isCancellation && !runtime.conversion.hasFailedOutcome(id: request.id)
             DiagnosticLog.record(.targetChanged)
             cancelForTargetChange()
+            if shouldReport {
+                runtime.feedback.report(.delivery(failure, stage: .targetValidation,
+                    sourceCharacters: request.source.count, sourceUTF16: request.source.utf16.count))
+                DiagnosticLog.record(.deliveryUnavailable)
+            }
             return
         }
         guard let outcome = runtime.conversion.takeOutcome(id: request.id) else { return }
@@ -372,10 +420,36 @@ final class SumibiInputController: IMKInputController {
             effects = state.completeSelection(id: request.id, result: result)
             runtime.selectionRange = nil
         }
-        _ = apply(effects, to: input)
+        var written: (NSRange, String)?
+        _ = apply(effects, to: input, onReplacementWritten: { written = ($0, $1) })
+        if let (range, text) = written, runtime.state.marked.isEmpty,
+           runtime.state.pending == nil, runtime.state.previous?.result == text {
+            let verification = AmbientResultVerification(expected: text,
+                range: NSRange(location: range.location, length: text.utf16.count),
+                selectionAtWrite: input.selectedRange())
+            let route = ObjectIdentifier(input as AnyObject)
+            let processID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+            let activity = Self.inputCounts()
+            runtime.resultVerifier.start(sourceCharacters: request.source.count,
+                sourceUTF16: request.source.utf16.count, expectedUTF16: text.utf16.count,
+                read: { [weak verificationRuntime = runtime] in
+                    guard let runtime = verificationRuntime, !IsSecureEventInputEnabled(),
+                          Self.inputCounts() == activity,
+                          NSWorkspace.shared.frontmostApplication?.processIdentifier == processID,
+                          let controller = runtime.latest ?? runtime.lastHandler else { return nil }
+                    guard let current = controller.liveInput() else { return .unavailable }
+                    guard !controller.isExcluded(current),
+                          ObjectIdentifier(current as AnyObject) == route,
+                          verification.isCurrent(runtime: runtime, input: IMKInputClient(current)) else { return nil }
+                    return verification.readback(IMKInputClient(current))
+                })
+        }
     }
 
     private func decode(_ event: NSEvent) -> InputKey? {
+        // Arrow characters are private-use Unicode, not printable input, even if
+        // a client omits the usual .function modifier from the event.
+        if InputRuntime.isNavigationKey(event.keyCode) { return nil }
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if event.keyCode == 53, modifiers.intersection([.shift, .command, .control, .option, .function]).isEmpty {
             return .cancel
@@ -393,12 +467,165 @@ final class SumibiInputController: IMKInputController {
         return .text(text)
     }
 
-    private func apply(_ effects: [SessionEffect], to input: IMKTextInput) -> Bool {
+    private func apply(_ effects: [SessionEffect], to input: IMKTextInput,
+                       onReplacementWritten: ((NSRange, String) -> Void)? = nil) -> Bool {
         InputEffectApplier(runtime: runtime,
                        startConversion: { [self] id, request in startConversion(id: id, request: request) },
                        pokeClient: { [self] _ in pokeClient(input) },
-                       selectCandidate: { [weak self] index in self?.chooseCandidate(at: index, in: nil) })
+                       selectCandidate: { [weak self] index in self?.chooseCandidate(at: index, in: nil) },
+                       onReplacementWritten: onReplacementWritten)
         .apply(effects, to: IMKInputClient(input))
+    }
+
+    private func observeAmbient(latestKey: String) {
+        let settings = DecisionsSettingsStore().load()
+        guard settings.permitsSending else { runtime.ambient.stop(); return }
+        guard !IsSecureEventInputEnabled() else { runtime.ambient.skipObservation(.secureInput); return }
+        guard state.pending == nil, !runtime.candidates.shouldBeVisible else {
+            runtime.ambient.skipObservation(.busy); return
+        }
+        guard AmbientText.isEligible(state.marked) else {
+            runtime.ambient.skipObservation(.unsupportedText); return
+        }
+        guard let input = liveInput(), !isExcluded(input) else {
+            runtime.ambient.skipObservation(.inputUnavailable); return
+        }
+        guard let application = NSWorkspace.shared.frontmostApplication,
+              application.bundleIdentifier == input.bundleIdentifier() else {
+            runtime.ambient.skipObservation(.frontmostMismatch); return
+        }
+        let snapshot: AmbientInputSnapshot
+        var rejectedRanges: AmbientRangeReport?
+        var sourceReadReport: AmbientSourceReadReport?
+        switch AmbientInputSnapshot.capture(source: state.marked, input: IMKInputClient(input),
+            allowUnreadableComposition: true,
+            onRanges: { rejectedRanges = $0 },
+            onSelectionMismatch: { rejectedRanges = AmbientRangeReport(marked: $0, selection: $1) },
+            onSourceRead: { ranges, length in
+                rejectedRanges = ranges
+                sourceReadReport = AmbientSourceReadReport(requestedLength: ranges.marked.length, returnedLength: length)
+            }) {
+        case .success(let captured): snapshot = captured
+        case .failure(let reason):
+            runtime.ambient.skipObservation(reason, ranges: rejectedRanges, sourceRead: sourceReadReport,
+                sourceCharacters: state.marked.count, sourceUTF16: state.marked.utf16.count); return
+        }
+        guard let observation = DecisionsObservation(text: snapshot.source, latestKey: latestKey,
+                                               maximumCharacters: settings.maximumCharacters) else {
+            runtime.ambient.skipObservation(.invalidObservation); return
+        }
+        let route = ObjectIdentifier(input as AnyObject)
+        let processID = application.processIdentifier
+        let activity = Self.inputCounts()
+        let runtime = runtime
+        let valid: () -> Bool = {
+            guard !IsSecureEventInputEnabled(), Self.inputCounts() == activity,
+                  NSWorkspace.shared.frontmostApplication?.processIdentifier == processID,
+                  runtime.state.pending == nil, runtime.state.marked == snapshot.source,
+                  !runtime.candidates.shouldBeVisible,
+                  let controller = runtime.latest ?? runtime.lastHandler,
+                  let current = controller.liveInput(), !controller.isExcluded(current),
+                  ObjectIdentifier(current as AnyObject) == route else { return false }
+            var sourceRead: AmbientSourceReadReport?
+            if let failure = snapshot.validationFailure(in: IMKInputClient(current), onSourceRead: { length in
+                sourceRead = AmbientSourceReadReport(requestedLength: snapshot.marked.length, returnedLength: length)
+            }) {
+                if failure != .targetChanged {
+                    runtime.ambient.skipObservation(failure,
+                        ranges: AmbientRangeReport(marked: snapshot.marked, selection: snapshot.selection),
+                        sourceRead: sourceRead, sourceCharacters: snapshot.source.count,
+                        sourceUTF16: snapshot.source.utf16.count)
+                }
+                return false
+            }
+            return true
+        }
+        var verification: AmbientResultVerification?
+        var sourceVerification: AmbientSourceVerification?
+        runtime.ambient.observe(.init(observation: observation, isCurrent: valid, apply: { result in
+            runtime.ambient.beginDeliveryAttempt()
+            guard valid(), let controller = runtime.latest ?? runtime.lastHandler,
+                  let current = controller.liveInput() else {
+                runtime.ambient.recordDeliveryFailure(.targetChangedBeforeCommit); return false
+            }
+            return AmbientResultApplier(runtime: runtime).apply(result, to: IMKInputClient(current),
+                allowUnreadableComposition: snapshot.requiresCommittedValidation,
+                onFailure: { runtime.ambient.recordDeliveryFailure($0) },
+                onCommitReport: { runtime.ambient.recordCommitReport($0) },
+                onCommitTextReport: runtime.ambient.debugTextEnabled ? { runtime.ambient.recordCommitText($0) } : nil,
+                onResultTextReport: runtime.ambient.debugTextEnabled ? { runtime.ambient.recordResultText($0) } : nil,
+                onDeferredVerification: { verification = $0 },
+                onDeferredSource: { sourceVerification = $0 })
+        }, verify: {
+            // Do not reuse the pre-commit snapshot: composition has ended. The route,
+            // user activity and exact result anchor must still belong to this delivery.
+            guard let verification, !IsSecureEventInputEnabled(), Self.inputCounts() == activity,
+                  NSWorkspace.shared.frontmostApplication?.processIdentifier == processID,
+                  let controller = runtime.latest ?? runtime.lastHandler else { return .cancelled }
+            guard let current = controller.liveInput() else {
+                runtime.ambient.recordResultReadback(.unavailable, expectedUTF16: verification.expected.utf16.count)
+                return .waiting
+            }
+            guard !controller.isExcluded(current),
+                  ObjectIdentifier(current as AnyObject) == route,
+                  verification.isCurrent(runtime: runtime, input: IMKInputClient(current)) else { return .cancelled }
+            let readback = verification.readback(IMKInputClient(current),
+                captureText: runtime.ambient.debugTextEnabled ? { runtime.ambient.recordResultText($0) } : nil)
+            runtime.ambient.recordResultReadback(readback, expectedUTF16: verification.expected.utf16.count)
+            return readback == .matching ? .confirmed : .waiting
+        }, sourceContinuation: {
+            guard let sourceVerification else { return nil }
+            let mayApply: () -> Bool = {
+                guard !IsSecureEventInputEnabled(), Self.inputCounts() == activity,
+                      NSWorkspace.shared.frontmostApplication?.processIdentifier == processID,
+                      let controller = runtime.latest ?? runtime.lastHandler,
+                      let current = controller.liveInput(), !controller.isExcluded(current),
+                      ObjectIdentifier(current as AnyObject) == route else { return false }
+                return true
+            }
+            return AmbientConversionLifecycle.SourceContinuation(poll: { deadline in
+                // A new event cancels this wait before normal input handling. Check
+                // focus/route/activity/secure input again immediately before each read.
+                guard mayApply(), let controller = runtime.latest ?? runtime.lastHandler,
+                      let current = controller.liveInput() else { return .cancelled }
+                return AmbientResultApplier(runtime: runtime).resumeSource(sourceVerification,
+                    to: IMKInputClient(current), deadline: deadline, mayApply: mayApply,
+                    onCommitReport: { runtime.ambient.recordCommitReport($0) },
+                    onCommitTextReport: runtime.ambient.debugTextEnabled ? { runtime.ambient.recordCommitText($0) } : nil,
+                    onResultTextReport: runtime.ambient.debugTextEnabled ? { runtime.ambient.recordResultText($0) } : nil,
+                    onDeferredVerification: { verification = $0 })
+            }, cancel: { sourceVerification.cancel(runtime: runtime) })
+        }, onAccepted: {
+            guard valid(), let controller = runtime.latest ?? runtime.lastHandler,
+                  let current = controller.liveInput() else { return }
+            runtime.caretCue.show(in: IMKInputClient(current), isCurrent: { [weak cueRuntime = runtime] in
+                guard let runtime = cueRuntime, !IsSecureEventInputEnabled(), Self.inputCounts() == activity,
+                      NSWorkspace.shared.frontmostApplication?.processIdentifier == processID,
+                      runtime.state.pending == nil, !runtime.candidates.shouldBeVisible,
+                      let controller = runtime.latest ?? runtime.lastHandler,
+                      let current = controller.liveInput(), !controller.isExcluded(current),
+                      ObjectIdentifier(current as AnyObject) == route else { return false }
+                return true
+            })
+        }))
+    }
+
+    /// Called only for a newly reported error. No text access or focus change.
+    func showCaretErrorCue() {
+        guard !IsSecureEventInputEnabled(), let input = liveInput(), !isExcluded(input),
+              let application = NSWorkspace.shared.frontmostApplication,
+              application.bundleIdentifier == input.bundleIdentifier() else { return }
+        let route = ObjectIdentifier(input as AnyObject)
+        let processID = application.processIdentifier
+        let activity = Self.inputCounts()
+        runtime.caretCue.show(in: IMKInputClient(input), kind: .error, isCurrent: { [weak cueRuntime = runtime] in
+            guard let runtime = cueRuntime, !IsSecureEventInputEnabled(), Self.inputCounts() == activity,
+                  NSWorkspace.shared.frontmostApplication?.processIdentifier == processID,
+                  let controller = runtime.latest ?? runtime.lastHandler,
+                  let current = controller.liveInput(), !controller.isExcluded(current),
+                  ObjectIdentifier(current as AnyObject) == route else { return false }
+            return true
+        })
     }
 
     /// 選択範囲とその文字列。読めない入力先ではnilを返し、何も書き換えない。
