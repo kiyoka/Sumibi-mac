@@ -60,6 +60,12 @@ final class ConversionLifecycle {
     }
 
     /// Consume exactly once, before draining queued keys can start the next request.
+    func hasFailedOutcome(id: Int) -> Bool {
+        guard requestID == id, case .failure? = outcome else { return false }
+        return true
+    }
+
+    /// Consume exactly once, before draining queued keys can start the next request.
     func takeOutcome(id: Int) -> PendingOutcome? {
         guard requestID == id, let result = outcome else { return nil }
         cancel()

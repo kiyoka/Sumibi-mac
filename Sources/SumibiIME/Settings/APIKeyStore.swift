@@ -31,14 +31,18 @@ struct SystemKeychainAccess: KeychainAccess {
 /// 項目の持ち方はSumibi-iOSの`APIKeyStore`に合わせる。コードは共有しない。
 /// サービス名はバンドル識別子から作らない。識別子を変えても(#11)保存済みのキーを失わないため。
 struct APIKeyStore {
-    private static let service = "org.sumibi.Sumibi-mac.api-key"
+    private let service: String
     private static let account = "default"
     private let keychain: any KeychainAccess
 
-    init(keychain: any KeychainAccess = SystemKeychainAccess()) { self.keychain = keychain }
+    init(keychain: any KeychainAccess = SystemKeychainAccess(),
+         service: String = "org.sumibi.Sumibi-mac.api-key") {
+        self.keychain = keychain
+        self.service = service
+    }
 
     func load() throws -> String? {
-        var query = Self.baseQuery
+        var query = baseQuery
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
 
@@ -59,28 +63,28 @@ struct APIKeyStore {
             kSecAttrSynchronizable as String: false,
         ]
 
-        let updateStatus = keychain.update(Self.baseQuery as CFDictionary, attributes: attributes as CFDictionary)
+        let updateStatus = keychain.update(baseQuery as CFDictionary, attributes: attributes as CFDictionary)
         if updateStatus == errSecSuccess { return }
         guard updateStatus == errSecItemNotFound else { throw APIKeyStoreError.keychain(updateStatus) }
 
-        var item = Self.baseQuery
+        var item = baseQuery
         attributes.forEach { item[$0.key] = $0.value }
         let addStatus = keychain.add(item as CFDictionary)
         guard addStatus == errSecSuccess else { throw APIKeyStoreError.keychain(addStatus) }
     }
 
     func delete() throws {
-        let status = keychain.delete(Self.baseQuery as CFDictionary)
+        let status = keychain.delete(baseQuery as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw APIKeyStoreError.keychain(status)
         }
     }
 
-    private static var baseQuery: [String: Any] {
+    private var baseQuery: [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            kSecAttrAccount as String: Self.account,
             kSecAttrSynchronizable as String: false,
         ]
     }

@@ -7,6 +7,7 @@ struct APISettingsView: View {
     @State private var userDictionary = ""
     @State private var isShowingUserDictionary = false
     @State private var isShowingDeletionConfirmation = false
+    @State private var isShowingDecisionsSettings = false
     @FocusState private var focusedField: Field?
 
     private enum Field { case endpoint, modelName, apiKey }
@@ -75,11 +76,18 @@ struct APISettingsView: View {
                 Text("同意すると、変換のたびに変換対象の文字列と登録したユーザー辞書が上記の送信先へ送られます。送信先での扱いは、利用者が選んだAPIプロバイダーの規約に従います。プロバイダーの料金が発生します。送信先を変えた場合は、改めて同意が必要です。同意はいつでも取り消せます。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                Text("変換キーを押したときだけ送信します。キー入力や原文をログへ保存しません。周辺文脈は送信しません。")
+                Text("手動変換時と、Decisions自動変換を有効にした場合の変換時に送信します。キー入力や原文をログへ保存しません。周辺文脈は送信しません。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } header: {
                 Text("送信先と料金")
+            }
+
+            Section {
+                Button("Decisions自動変換の設定…") { isShowingDecisionsSettings = true }
+            } footer: {
+                Text("OpenAI Decisionsで日本語らしさを判定し、自動変換する機能です。公式OpenAI接続先と既存の変換用キーを使い、自動送信への同意を別途設定します。")
+                    .font(.footnote).foregroundStyle(.secondary)
             }
 
             Section {
@@ -133,6 +141,7 @@ struct APISettingsView: View {
                 userDictionary = saved
             }
         }
+        .sheet(isPresented: $isShowingDecisionsSettings) { DecisionsSettingsView() }
         .confirmationDialog("保存したAPIキーを削除しますか？",
                             isPresented: $isShowingDeletionConfirmation,
                             titleVisibility: .visible) {

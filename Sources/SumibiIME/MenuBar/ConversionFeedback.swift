@@ -6,8 +6,21 @@ struct ConversionNotice: Equatable {
     let title: String
     let message: String
     let advice: String
+    var stage: String? = nil
+    var details: String? = nil
+    var explanations: [String] = []
 
     static func failure(_ error: ConversionError) -> Self {
+        var notice = apiFailure(error)
+        switch error {
+        case .apiKeyMissing, .consentMissing, .overLimit, .invalidEndpoint:
+            notice.stage = "変換API・送信前の確認"
+        default: notice.stage = "変換API・通信／応答取得"
+        }
+        return notice
+    }
+
+    private static func apiFailure(_ error: ConversionError) -> Self {
         switch error {
         case .apiKeyMissing:
             return Self(title: "APIキーを利用できません", message: "未設定、またはKeychainから読み取れないため送信していません。",
@@ -47,29 +60,58 @@ struct ConversionNotice: Equatable {
 
     static let inputUnavailable = Self(title: "変換結果を適用できませんでした",
                                       message: "入力先に接続できませんでした。",
-                                      advice: "入力先に戻り、原文を確認してもう一度変換してください。")
+                                      advice: "入力先に戻り、原文を確認してもう一度変換してください。",
+                                      stage: "入力先の取得（反映待ち）")
     static let selectionUnreadable = Self(title: "選択した文字列を読み取れませんでした",
                                          message: "この入力先から変換対象を取得できませんでした。",
-                                         advice: "選択範囲を確認するか、別の入力欄で試してください。")
+                                         advice: "選択範囲を確認するか、別の入力欄で試してください。",
+                                         stage: "選択した原文の読み取り")
+}
+
+/// Numeric decision only: no input text, provider response body or persistent history.
+struct DecisionsDecisionReport: Equatable {
+    let score: Double
+    let threshold: Double
+    var accepted: Bool { score >= threshold }
+    var summary: String {
+        "\(accepted ? "変換対象" : "見送り")（スコア \(String(format: "%.3f", score))／閾値 \(String(format: "%.2f", threshold))）"
+    }
 }
 
 /// Main-thread UI state, separate from input recovery. Reading/clearing cannot touch input.
 final class ConversionFeedback {
-    enum Indicator: Equatable { case idle, converting, error }
+    enum Indicator: Equatable { case idle, converting, decisionsAccepted, error }
     private(set) var isConverting = false
+    private(set) var isDecisionsAccepted = false
+    private(set) var lastDecisionsDecision: DecisionsDecisionReport?
     private(set) var notice: ConversionNotice?
     var onChange: (() -> Void)?
+    /// New failures only; ordinary refresh/clear must not replay a local cue.
+    var onNotice: (() -> Void)?
 
-    var indicator: Indicator { notice != nil ? .error : (isConverting ? .converting : .idle) }
+    var indicator: Indicator {
+        if notice != nil { return .error }
+        if isConverting { return isDecisionsAccepted ? .decisionsAccepted : .converting }
+        return .idle
+    }
     var accessibilityLabel: String {
         var label = "Sumibi"
         if isConverting { label += "、変換中" }
+        if isDecisionsAccepted { label += "、Decisionsが変換対象と判定しました" }
         if notice != nil { label += "、未確認の変換エラーがあります" }
         return label
     }
 
-    func begin() { isConverting = true; onChange?() }
-    func finish() { isConverting = false; onChange?() }
-    func report(_ notice: ConversionNotice) { self.notice = notice; onChange?() }
+    func begin() { isConverting = true; isDecisionsAccepted = false; onChange?() }
+    func finish() { isConverting = false; isDecisionsAccepted = false; onChange?() }
+    func recordDecisionsDecision(score: Double, threshold: Double) {
+        guard score.isFinite, threshold.isFinite, (0...1).contains(score), (0...1).contains(threshold) else { return }
+        let decision = DecisionsDecisionReport(score: score, threshold: threshold)
+        lastDecisionsDecision = decision
+        isDecisionsAccepted = isConverting && decision.accepted
+        onChange?()
+    }
+    func clearDecisionsDecision() { lastDecisionsDecision = nil; isDecisionsAccepted = false; onChange?() }
+    func report(_ notice: ConversionNotice) { self.notice = notice; onChange?(); onNotice?() }
     func clearNotice() { notice = nil; onChange?() }
 }

@@ -89,6 +89,40 @@ final class TextReplacementTrackerTests: XCTestCase {
         XCTAssertFalse(tracker.validatesPendingTarget(request, in: document.input))
     }
 
+    func testLongInputHasNoHundredCharacterCutoffWhenEntireSourceIsReadable() {
+        for count in [99, 100, 101, 200, 512] {
+            let source = String(repeating: "a", count: count)
+            let (tracker, request) = pendingFirst(source: source, caret: count)
+            let document = ReplacementDocument(source, selection: NSRange(location: count, length: 0))
+            XCTAssertNil(tracker.resolvePendingTarget(request, in: document.input))
+            XCTAssertEqual(tracker.anchor?.range.length, count)
+        }
+    }
+
+    func testSimulatedReadLimitDistinguishesPartialReadFromUnavailableRead() {
+        let source = String(repeating: "a", count: 101)
+        for clipped in [false, true] {
+            let (tracker, request) = pendingFirst(source: source, caret: 101)
+            let document = ReplacementDocument(source, selection: NSRange(location: 101, length: 0))
+            document.maximumReadableLength = 100
+            document.clipsLongRead = clipped
+            XCTAssertEqual(tracker.resolvePendingTarget(request, in: document.input),
+                clipped ? .lengthMismatch(expected: 101, actual: 100) : .sourceUnavailable)
+            XCTAssertEqual(document.text, source)
+        }
+    }
+
+    func testDiagnosisDistinguishesNormalCancellationFromLostOrMismatchingTarget() {
+        let (tracker, request) = pendingFirst(source: "abc", caret: 3)
+        let document = ReplacementDocument("xyz", selection: NSRange(location: 3, length: 0))
+        XCTAssertEqual(tracker.resolvePendingTarget(request, in: document.input), .sourceMismatch)
+        document.selection = NSRange(location: 1, length: 0)
+        XCTAssertEqual(tracker.resolvePendingTarget(request, in: document.input), .selectionChanged)
+        XCTAssertTrue(tracker.pendingFailure(request, in: document.input).isCancellation)
+        tracker.pendingTarget = nil
+        XCTAssertEqual(tracker.pendingFailure(request, in: document.input), .trackingUnavailable)
+    }
+
     private func pendingFirst(source: String, caret: Int) -> (TextReplacementTracker, PendingRequest) {
         let session = InputSession()
         _ = session.receive(.text(source))
@@ -107,6 +141,8 @@ private final class ReplacementDocument {
     var selection: NSRange
     var canRead = true
     var minimumReadableLocation = 0
+    var maximumReadableLength: Int?
+    var clipsLongRead = false
 
     init(_ text: String, selection: NSRange) { self.text = text; self.selection = selection }
 
@@ -115,6 +151,9 @@ private final class ReplacementDocument {
             let text = self.text as NSString
             guard self.canRead, range.location >= self.minimumReadableLocation,
                   range.location <= text.length, range.length <= text.length - range.location else { return nil }
+            if let limit = self.maximumReadableLength, range.length > limit {
+                return self.clipsLongRead ? text.substring(with: NSRange(location: range.location, length: limit)) : nil
+            }
             return text.substring(with: range)
         })
     }

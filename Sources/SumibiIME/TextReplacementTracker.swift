@@ -66,6 +66,39 @@ final class TextReplacementTracker {
         return ok
     }
 
+    /// Preserve the established re-anchor checks, then classify an unresolved failure.
+    func resolvePendingTarget(_ request: PendingRequest, in input: ReplacementInput) -> ReplacementValidationFailure? {
+        reanchorIfCaretLagged(request, in: input)
+        if !validatesPendingTarget(request, in: input) {
+            reportTargetMismatch(in: input)
+            reanchorAtCaret(request, in: input)
+        }
+        return validatesPendingTarget(request, in: input) ? nil : pendingFailure(request, in: input)
+    }
+
+    /// Diagnose a failed check without searching, writing, or retaining the read text.
+    /// Call only after the existing safe re-anchor attempts have failed.
+    func pendingFailure(_ request: PendingRequest, in input: ReplacementInput) -> ReplacementValidationFailure {
+        guard let target = pendingTarget else { return .trackingUnavailable }
+        guard target.requestID == request.id, target.kind == request.kind else { return .requestChanged }
+        guard target.selection == input.selectedRange() else { return .selectionChanged }
+        return anchorFailure(in: input, expected: target.expectedText)
+    }
+
+    func anchorFailure(in input: ReplacementInput, expected: String) -> ReplacementValidationFailure {
+        guard let anchor, anchor.text == expected else { return .trackingUnavailable }
+        guard anchor.span >= 0, anchor.end >= anchor.span else { return .rangeUnavailable }
+        let selection = input.selectedRange()
+        guard selection == anchor.range || selection == NSRange(location: anchor.end, length: 0) else {
+            return .selectionChanged
+        }
+        guard let actual = input.attributedSubstring(from: anchor.range)?.string else { return .sourceUnavailable }
+        guard actual.utf16.count == anchor.span else {
+            return .lengthMismatch(expected: anchor.span, actual: actual.utf16.count)
+        }
+        return .sourceMismatch
+    }
+
     /// ターミナルは書き込んだ文字を少し遅れて反映し、書き込んだ直後のカーソル位置は原文の手前のままになる。
     /// 応答時のカーソルが記録より原文の長さだけ後ろにあり、その直前に原文があれば、書き込みが反映されたものとして位置を改める。
     func reanchorIfCaretLagged(_ request: PendingRequest, in input: ReplacementInput) {

@@ -17,9 +17,15 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private let feedback = InputRuntime.shared.feedback
     private let conversionItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private let decisionsDecisionItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private let observationItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private let observationDetailsItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let errorHeading = NSMenuItem(title: "直近の変換エラー", action: nil, keyEquivalent: "")
     private let errorTitle = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let errorMessage = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private let errorStage = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private let errorDetails = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private let errorExplanations = LongInputGuidance.explanations.map { _ in NSMenuItem(title: "", action: nil, keyEquivalent: "") }
     private let errorAdvice = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let clearErrorItem = NSMenuItem(title: "エラー表示を解除", action: #selector(clearError), keyEquivalent: "")
     private let errorSeparator = NSMenuItem.separator()
@@ -36,8 +42,14 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.delegate = self
         conversionItem.isEnabled = false
         menu.addItem(conversionItem)
+        decisionsDecisionItem.isEnabled = false
+        menu.addItem(decisionsDecisionItem)
+        for row in [observationItem, observationDetailsItem] {
+            row.isEnabled = false
+            menu.addItem(row)
+        }
         menu.addItem(.separator())
-        for row in [errorHeading, errorTitle, errorMessage, errorAdvice] {
+        for row in [errorHeading, errorTitle, errorStage, errorMessage, errorDetails] + errorExplanations + [errorAdvice] {
             row.isEnabled = false
             menu.addItem(row)
         }
@@ -67,14 +79,23 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         image.size = NSSize(width: 18, height: 18)
         image.isTemplate = true
         guard indicator != .idle else { return image }
-        let symbolName = indicator == .error ? "exclamationmark.circle.fill" : "hourglass"
+        let symbolName: String
+        switch indicator {
+        case .error: symbolName = "exclamationmark.circle.fill"
+        case .decisionsAccepted: symbolName = "checkmark.circle.fill"
+        default: symbolName = "hourglass"
+        }
         guard let badge = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) else { return image }
         let combined = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
             image.draw(in: NSRect(x: 0, y: 3, width: 12, height: 12))
             badge.draw(in: NSRect(x: 10, y: 0, width: 8, height: 10))
+            if indicator == .decisionsAccepted {
+                NSColor.systemGreen.setFill()
+                rect.fill(using: .sourceIn)
+            }
             return true
         }
-        combined.isTemplate = true
+        combined.isTemplate = indicator != .decisionsAccepted
         return combined
     }
 
@@ -83,13 +104,31 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         statusItem?.button?.image = Self.icon(indicator: feedback.indicator)
         statusItem?.button?.setAccessibilityLabel(feedback.accessibilityLabel)
         statusItem?.button?.toolTip = feedback.accessibilityLabel
-        conversionItem.title = feedback.isConverting ? "変換中…（入力は続けられます）" : "変換待ちはありません"
+        conversionItem.title = feedback.isConverting
+            ? (feedback.isDecisionsAccepted ? "Decisionsが変換対象と判定・変換中…（入力は続けられます）" : "変換中…（入力は続けられます）")
+            : "変換待ちはありません"
+        decisionsDecisionItem.isHidden = feedback.lastDecisionsDecision == nil
+        decisionsDecisionItem.title = feedback.lastDecisionsDecision.map { "直近のDecisions判定：\($0.summary)" } ?? ""
+        let observation = InputRuntime.shared.ambient
+        observationItem.isHidden = observation.lastObservationBlock == nil
+        observationItem.title = observation.lastObservationBlock.map { "自動変換の見送り：\($0.rawValue)" } ?? ""
+        observationDetailsItem.isHidden = observation.lastObservationDetails == nil
+        observationDetailsItem.title = observation.lastObservationDetails ?? ""
         let notice = feedback.notice
         errorSeparator.isHidden = notice == nil
         for row in [errorHeading, errorTitle, errorMessage, errorAdvice, clearErrorItem] {
             row.isHidden = notice == nil
         }
         errorTitle.title = notice?.title ?? ""
+        errorStage.isHidden = notice?.stage == nil
+        errorStage.title = notice?.stage.map { "段階：\($0)" } ?? ""
+        errorDetails.isHidden = notice?.details == nil
+        errorDetails.title = notice?.details ?? ""
+        for (index, row) in errorExplanations.enumerated() {
+            let lines = notice?.explanations ?? []
+            row.isHidden = index >= lines.count
+            row.title = index < lines.count ? "解説：\(lines[index])" : ""
+        }
         errorMessage.title = notice.map { "原因：\($0.message)" } ?? ""
         errorAdvice.title = notice.map { "対処：\($0.advice)" } ?? ""
     }

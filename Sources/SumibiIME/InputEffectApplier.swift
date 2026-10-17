@@ -10,6 +10,8 @@ struct InputEffectApplier {
     let startConversion: (Int, ConversionRequest) -> Void
     let pokeClient: (any InputClient) -> Void
     let selectCandidate: (Int) -> Void
+    var onReplacementWritten: ((NSRange, String) -> Void)? = nil
+    var onReplacementRejected: ((ReplacementValidationFailure) -> Void)? = nil
     private var state: InputSession { runtime.state }
 
     func apply(_ effects: [SessionEffect], to input: any InputClient) -> Bool {
@@ -80,12 +82,27 @@ struct InputEffectApplier {
                 // Store only the weak-controller callback, not this applier (which owns runtime).
                 runtime.candidates.show(candidates: state.candidateStrings, in: input, onSelect: selectCandidate)
             case .replacePrevious(let old, let new):
-                guard runtime.replacement.validatesAnchor(in: ReplacementInput(input), expected: old), let anchor = runtime.replacement.anchor else { break }
+                guard runtime.replacement.validatesAnchor(in: ReplacementInput(input), expected: old), let anchor = runtime.replacement.anchor else {
+                    let failure = runtime.replacement.anchorFailure(in: ReplacementInput(input), expected: old)
+                    // Stop/rescue first: ambient.stop dismisses old cues. A new error cue
+                    // must be emitted after that cleanup, not immediately hidden by it.
+                    runtime.cancelForTargetChange()
+                    if let onReplacementRejected { onReplacementRejected(failure) }
+                    else if !failure.isCancellation {
+                        runtime.feedback.report(.delivery(failure, stage: .replacement,
+                            sourceCharacters: old.count, sourceUTF16: old.utf16.count))
+                        DiagnosticLog.record(.deliveryUnavailable)
+                    }
+                    // Do not leave a successful `previous` after a skipped replacement.
+                    // Rescue queued input; never write subsequent effects to an unverified target.
+                    return true
+                }
                 let range = anchor.range
                 input.insertText(new, replacementRange: range)
                 // 置換後の位置は、書き込んだ範囲から決める。Chromeは書き込み直後に
                 // 古いカーソル位置を返すことがあり、それを信じると次の置換位置がずれる。
                 runtime.replacement.anchor = ReplacementAnchor(end: range.location + new.utf16.count, text: new)
+                onReplacementWritten?(range, new)
             case .overLimit:
                 DiagnosticLog.record(.overLimit)
                 runtime.feedback.report(.failure(.overLimit(count: state.marked.count, limit: 1_000)))
