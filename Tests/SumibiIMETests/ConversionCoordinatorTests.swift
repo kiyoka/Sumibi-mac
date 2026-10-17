@@ -66,6 +66,43 @@ final class ConversionCoordinatorTests: XCTestCase {
         XCTAssertTrue(keys.calls.isEmpty)
     }
 
+    func testSymbolsAreAddedOnlyAfterOneSuccessfulAlternativesRequestWithoutChangingPayload() async throws {
+        let settings = settings()
+        settings.saveConsent(for: ProviderConfiguration.defaultEndpoint)
+        let service = SymbolRecordingService()
+        let coordinator = ConversionCoordinator(settings: settings, keys: APIKeyStore(keychain: keychainWithFakeKey()),
+            responseMode: { "api" }, dictionary: SupplementalCandidateDictionary(symbolTSV: "hoshi\t☆\t★")) { _ in service }
+        let first = ConversionRequest(source: "hoshi", userDictionary: "user=辞書")
+        let firstResult = await coordinator.convert(first)
+        XCTAssertEqual(firstResult, .success(ConversionResult(candidates: ["星"])))
+        let request = ConversionRequest(source: "hoshi", mode: .alternatives, currentConversion: "星", userDictionary: "user=辞書")
+        let result = await coordinator.convert(request)
+        XCTAssertEqual(result, .success(ConversionResult(candidates: ["星", "☆", "★"], dictionaryCandidates: ["☆", "★"])))
+        let requests = await service.requests
+        XCTAssertEqual(requests, [first, request]) // No extra request, no local index added to payload.
+    }
+
+    func testFailedAlternativesDoNotFallBackToLocalSymbols() async {
+        let settings = settings()
+        settings.saveConsent(for: ProviderConfiguration.defaultEndpoint)
+        let service = SymbolRecordingService(fails: true)
+        let coordinator = ConversionCoordinator(settings: settings, keys: APIKeyStore(keychain: keychainWithFakeKey()),
+            responseMode: { "api" }, dictionary: SupplementalCandidateDictionary(symbolTSV: "hoshi\t☆\t★")) { _ in service }
+        let result = await coordinator.convert(.init(source: "hoshi", mode: .alternatives))
+        XCTAssertEqual(result, .failure(.offline))
+        let requests = await service.requests
+        XCTAssertEqual(requests.count, 1)
+    }
+
+    func testMissingSymbolResourceStillReturnsUnchangedLLMResponse() async {
+        let settings = settings()
+        settings.saveConsent(for: ProviderConfiguration.defaultEndpoint)
+        let coordinator = ConversionCoordinator(settings: settings, keys: APIKeyStore(keychain: keychainWithFakeKey()),
+            responseMode: { "api" }, dictionary: SupplementalCandidateDictionary()) { _ in SymbolRecordingService() }
+        let result = await coordinator.convert(.init(source: "hoshi", mode: .alternatives))
+        XCTAssertEqual(result, .success(ConversionResult(candidates: ["星"])))
+    }
+
     private func settings() -> SettingsStore {
         let domain = "org.sumibi.tests.coordinator.\(UUID().uuidString)"
         domains.append(domain)
@@ -80,4 +117,15 @@ final class ConversionCoordinatorTests: XCTestCase {
 
 private struct ConstantConversionService: ConversionService {
     func convert(_ request: ConversionRequest) async throws -> ConversionResult { ConversionResult(candidates: ["固定結果"]) }
+}
+
+private actor SymbolRecordingService: ConversionService {
+    private(set) var requests: [ConversionRequest] = []
+    let fails: Bool
+    init(fails: Bool = false) { self.fails = fails }
+    func convert(_ request: ConversionRequest) async throws -> ConversionResult {
+        requests.append(request)
+        if fails { throw ConversionError.offline }
+        return ConversionResult(candidates: ["星"])
+    }
 }

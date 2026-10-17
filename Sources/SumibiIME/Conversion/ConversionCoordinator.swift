@@ -9,19 +9,26 @@ struct ConversionCoordinator {
     private let keys: APIKeyStore
     private let readResponseMode: () -> String
     private let makeClient: (OpenAICompatibleConfiguration) -> any ConversionService
+    private let dictionary: SupplementalCandidateDictionary?
 
     init(settings: SettingsStore = SettingsStore(), keys: APIKeyStore = APIKeyStore(),
          responseMode: @escaping () -> String = { ConversionCoordinator.responseMode },
+         dictionary: SupplementalCandidateDictionary? = nil,
          makeClient: @escaping (OpenAICompatibleConfiguration) -> any ConversionService = { OpenAICompatibleClient(configuration: $0) }) {
         self.settings = settings
         self.keys = keys
         readResponseMode = responseMode
         self.makeClient = makeClient
+        self.dictionary = dictionary
     }
 
-    private static let homophoneDictionary: HomophoneDictionary? = {
-        guard let url = Bundle.main.url(forResource: "SudachiCandidates", withExtension: "tsv") else { return nil }
-        return try? HomophoneDictionary(contentsOf: url)
+    private static let supplementalDictionary: SupplementalCandidateDictionary = {
+        let homophones = Bundle.main.url(forResource: "SudachiCandidates", withExtension: "tsv")
+            .flatMap { try? HomophoneDictionary(contentsOf: $0) }
+        let symbols = Bundle.main.url(forResource: "MozcSymbols", withExtension: "tsv")
+            .flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? ""
+        // Missing either resource must not disable the other dictionary or middle dot.
+        return SupplementalCandidateDictionary(symbolTSV: symbols, homophones: homophones)
     }()
 
     /// 明示的な開発版の模擬応答。通常版は保存済み設定に関係なくapiへ固定する。
@@ -64,15 +71,12 @@ struct ConversionCoordinator {
         do {
             try ConversionLimit.check(request)
             let result = try await service().convert(request)
-            guard request.mode == .alternatives, let dictionary = Self.homophoneDictionary else {
+            guard request.mode == .alternatives else {
                 return .success(result)
             }
-            let combined = dictionary.supplement(result.candidates)
-            return .success(ConversionResult(
-                candidates: combined,
-                model: result.model,
-                dictionaryCandidates: Set(combined.dropFirst(result.candidates.count))
-            ))
+            // Load bundled indexes only when alternatives actually succeed, not on
+            // the initial/manual or automatic conversion's latency-sensitive path.
+            return .success((dictionary ?? Self.supplementalDictionary).supplement(result, source: request.source))
         } catch let error as ConversionError {
             return .failure(error)
         } catch {

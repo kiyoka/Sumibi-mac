@@ -36,7 +36,7 @@ symbols, status = Open3.capture2e('nm', binary)
 abort 'Cannot inspect executable symbols' unless status.success?
 has_mock = symbols.include?('MockConversionService')
 abort "Unexpected mock service (#{mode})" unless has_mock == (mode == 'development')
-%w[AppIcon.icns InputMenuIcon.tiff MenuBarIcon.png MenuBarIcon@2x.png SudachiCandidates.tsv ja.lproj/InfoPlist.strings en.lproj/InfoPlist.strings SudachiDict/LICENSE-2.0.txt SudachiDict/LEGAL].each do |resource|
+%w[AppIcon.icns InputMenuIcon.tiff MenuBarIcon.png MenuBarIcon@2x.png SudachiCandidates.tsv MozcSymbols.tsv Mozc/LICENSE Mozc/ATTRIBUTION.txt ja.lproj/InfoPlist.strings en.lproj/InfoPlist.strings SudachiDict/LICENSE-2.0.txt SudachiDict/LEGAL].each do |resource|
   abort "Missing resource #{resource}" unless File.file?(File.join(app, 'Contents', 'Resources', resource))
 end
 output, status = Open3.capture2e('codesign', '--verify', '--strict', app)

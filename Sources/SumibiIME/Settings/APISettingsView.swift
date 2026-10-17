@@ -8,6 +8,7 @@ struct APISettingsView: View {
     @State private var isShowingUserDictionary = false
     @State private var isShowingDeletionConfirmation = false
     @State private var isShowingDecisionsSettings = false
+    @State private var isShowingMozcLicense = false
     @FocusState private var focusedField: Field?
 
     private enum Field { case endpoint, modelName, apiKey }
@@ -109,6 +110,10 @@ struct APISettingsView: View {
             }
 
             Section {
+                Button("記号データ（Mozc）のライセンス…") { isShowingMozcLicense = true }
+            }
+
+            Section {
                 HStack {
                     Button("設定を保存") {
                         focusedField = nil
@@ -142,6 +147,7 @@ struct APISettingsView: View {
             }
         }
         .sheet(isPresented: $isShowingDecisionsSettings) { DecisionsSettingsView() }
+        .sheet(isPresented: $isShowingMozcLicense) { MozcLicenseView() }
         .confirmationDialog("保存したAPIキーを削除しますか？",
                             isPresented: $isShowingDeletionConfirmation,
                             titleVisibility: .visible) {
