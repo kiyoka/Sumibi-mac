@@ -4,4 +4,16 @@
     <key>CFBundleIdentifier</key><string>org.sumibi.inputmethod.Sumibi</string>
     <key>CFBundleShortVersionString</key><string>0.4</string>
     <key>CFBundleVersion</key><string>4</string>
+    <key>CFBundleExecutable</key><string>Sumibi</string>
+    <key>InputMethodConnectionName</key><string>org.sumibi.inputmethod.Sumibi_Connection</string>
+    <key>InputMethodServerControllerClass</key><string>SumibiPrototypeInputController</string>
+    <key>SumibiDevelopmentBuild</key><false/>
+    <key>LSMinimumSystemVersion</key><string>26.0</string>
+    <key>ComponentInputModeDict</key><dict>
+        <key>tsInputModeListKey</key><dict>
+            <key>com.apple.inputmethod.Japanese</key><dict>
+                <key>TISInputSourceID</key><string>org.sumibi.inputmethod.Sumibi.Japanese</string>
+            </dict>
+        </dict>
+    </dict>
 </dict></plist>

@@ -6,20 +6,32 @@ printf '%s' "$tool" >> "$SUMIBI_TEST_TRACE"
 for argument do printf '|%s' "$argument" >> "$SUMIBI_TEST_TRACE"; done
 printf '\n' >> "$SUMIBI_TEST_TRACE"
 case "$tool" in
-    security) exit 0 ;; # No identities: never inspect the real Keychain.
+    security) # Never inspect the real Keychain.
+        if [ "${TEST_APP_IDENTITY_AVAILABLE:-no}" = yes ]; then
+            printf '1) FAKE "Developer ID Application: Test (TEST)"\n'
+        fi
+        if [ "${TEST_INSTALLER_IDENTITY_AVAILABLE:-yes}" = yes ]; then
+            printf '2) FAKE "Developer ID Installer: Test (TEST)"\n'
+        fi ;;
     codesign)
         if [ "$1" = '--display' ]; then
             printf 'Authority=%s\nTeamIdentifier=%s\n' "${TEST_APP_AUTHORITY:-Developer ID Application: Test (TEST)}" "${TEST_APP_TEAM:-TEST}"
             if [ "${TEST_RUNTIME:-yes}" = yes ]; then printf 'CodeDirectory flags=0x10000(runtime)\n'; fi
             if [ "${TEST_TIMESTAMP:-yes}" = yes ]; then printf 'Timestamp=Test timestamp\n'; fi
         fi ;;
-    lipo) printf '%s\n' arm64 ;;
+    nm) exit 0 ;; # Fixture has no development service symbols.
+    lipo) printf '%s\n' "${TEST_ARCHITECTURES:-arm64}" ;;
     ditto) /usr/bin/ditto "$@" ;;
     pkgbuild|productbuild)
         for argument do output="$argument"; done
         printf 'FAKE TEST PACKAGE - NOT DISTRIBUTABLE\n' > "$output" ;;
     pkgutil) printf '%s\n' "${TEST_PKG_AUTHORITY:-Developer ID Installer: Test (TEST)}" ;;
     xcrun)
+        # macOS Ruby may query SDK metadata while formatting an exception.
+        if [ "$*" = '--sdk macosx --show-sdk-path' ]; then
+            printf '/fixture-sdk\n'
+            exit 0
+        fi
         case "$1 $2" in
             'notarytool submit')
                 if [ "${TEST_SUBMIT_EXIT:-0}" -ne 0 ]; then exit "$TEST_SUBMIT_EXIT"; fi

@@ -61,25 +61,16 @@ SUMIBI_RUN_TIMEOUT_TEST=1 SUMIBI_DEVELOPMENT_FEATURES=0 swift test --filter Conv
 ## 配布スクリプトの模擬テスト
 
 ```sh
-ruby Tests/Distribution/test-distribution.rb /path/to/repository-with-distribution-scripts
+ruby Tests/Distribution/test-distribution.rb
 ```
 
-`Distribution/`が現在のリポジトリにある場合は引数を省略できる。macOS標準のRuby・PlistBuddyとRuby標準ライブラリを使用する。追加のアカウント設定・証明書は不要。
+macOS標準のRuby・PlistBuddyとRuby標準ライブラリを使用する。追加のアカウント設定・証明書は不要。別の作業ツリーを対象にする場合はそのルートを引数に指定できる。対象には`Distribution/`と`Development/verify-build.rb`が必要。
 
-配布スクリプトは#15の別ブランチにあり、この#46の変更へは混ぜていない。#15のコミット`c027ccf`のローカルスナップショットを対象に、以下でも再実行できる。
+2026-10-04は別ブランチのコミット`c027ccf`に対する18項目が成功した。2026-10-15、#15を現在の作業ツリーへ取り込み、28項目が成功。従来の引数・証明書種別・チーム・Hardened Runtime・タイムスタンプ、単一ユーザー用の配置設定、再配置無効、公証の承認・拒否・送信失敗、staple失敗、Gatekeeper拒否時の停止に加え、現在の通常版ビルド入口・継承署名指定の上書き、開発版・開発コード・不足リソース・不正バージョン・未対応CPUの拒否、対応OSの反映、生成したpkgの署名照合を確認する。
 
-```sh
-set -o pipefail
-distribution_snapshot="$(mktemp -d /private/tmp/sumibi-distribution-snapshot.XXXXXX)"
-git archive c027ccf Distribution | tar -x -C "$distribution_snapshot"
-ruby Tests/Distribution/test-distribution.rb "$distribution_snapshot"
-```
+テストは対象の`Distribution/`と成果物検証処理を新規一時ディレクトリへコピーし、そのコピーだけを実行する。アプリ組み立てと署名・公証・Gatekeeper・バイナリ検査のツールは模擬処理へ差し替え、呼び出しと順序を記録する。生成するアプリ・パッケージ・チェックサムはダミーであり配布不可。入力元リポジトリ、実Keychain、インストール済みアプリを変更せず、Appleへ送信しない。テスト作業領域は終了時に削除する。
 
-2026-10-04、このスナップショットに対する18項目が成功。引数・証明書種別・チーム・Hardened Runtime・タイムスタンプの検証、単一ユーザー用の配置設定、自動再配置の無効化、公証の承認・拒否・送信失敗、staple失敗、Gatekeeper拒否時の停止を検証する。
-
-テストは対象の`Distribution/`を新規一時ディレクトリへコピーし、そのコピーだけを実行する。署名・公証・Gatekeeper・ビルドのツールは専用PATHの模擬ツールへ差し替え、呼び出しと順序を記録する。生成するパッケージとチェックサムはダミーであり配布不可。入力元リポジトリ、実Keychain、インストール済みアプリを変更せず、Appleへ送信しない。テスト作業領域は終了時に削除する。
-
-#15の未マージスクリプトが見つからない場合は明示的に失敗する。検証済み扱いで黙ってスキップしない。実際のDeveloper ID署名・公証・Gatekeeper判定・別Macでの導入は、この模擬テストで確認した扱いにはしない。
+必要なスクリプトが見つからない場合は明示的に失敗する。検証済み扱いで黙ってスキップしない。実際のDeveloper ID署名・公証・Gatekeeper判定・別Macでの導入は、この模擬テストで確認した扱いにはしない。[実配布の準備と未実施項目](../docs/DEVELOPER_ID_DISTRIBUTION.md)を参照。
 
 ## 手動チェックリスト
 

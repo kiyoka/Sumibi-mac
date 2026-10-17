@@ -28,7 +28,7 @@ ruby Development/verify-build.rb production .build/app/Sumibi.app
 
 `App/build.sh`は呼び出し元に`SUMIBI_DEVELOPMENT_FEATURES=1`が残っていても、引数なしなら必ず0へ上書きする。通常版はdebug/releaseにかかわらず、模擬応答・入力文字列を含む診断・`--settings`による設定画面単独起動をコンパイルしない。開発設定も読み取らず、実API・入力内容診断なし・`marked`方式に固定する。実APIの利用にはAPIキーと送信同意が必要。通常の文字数・範囲などの診断ログは維持し、ログ量や切り替えは#14で扱う。
 
-`Prototype/build.sh`は開発用引数を拒否し、通常版を作って`.build/prototype/Sumibi.app`へコピーする。#15の未マージの配布スクリプトからも呼び出せる。署名変数の旧名`SUMIBI_PROTOTYPE_SIGN_IDENTITY`も互換用に受け付けるが、`SUMIBI_SIGN_IDENTITY`を優先する。#15統合時は新しい入口へ追従する。
+`Prototype/build.sh`は開発用引数を拒否し、通常版を作って`.build/prototype/Sumibi.app`へコピーする互換入口。署名変数の旧名`SUMIBI_PROTOTYPE_SIGN_IDENTITY`も互換用に受け付けるが、`SUMIBI_SIGN_IDENTITY`を優先する。2026-10-15の#15作業版では、配布用入口`Distribution/build-app.sh`は`App/build.sh`を直接呼び、通常版の内容検証後に独立コピーへ配布署名を行う。同日、アプリ・pkgの実Developer ID署名とタイムスタンプの検査、および検証用pkgのApple公証・チケット添付・Gatekeeper判定に成功した。実機へのpkg導入は未実施。[配布手順](DEVELOPER_ID_DISTRIBUTION.md)を参照。
 
 ## 明示的な開発版
 
