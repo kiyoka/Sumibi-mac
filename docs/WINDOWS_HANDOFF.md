@@ -11,7 +11,7 @@ Windows用リポジトリの作成、コード移植、配布や署名は本作�
 3. [SPEC](SPEC.md)で合意要件を読み、未実装の要件を現在の機能として取り込まない。
 4. [技術解説](TECHNICAL_OVERVIEW.md)、[Tests/README](../Tests/README.md)からコードと回帰ケースを参照する。
 
-基準mainは`ac83ff0`（PR #60まで）。記号サポートは`401507c`／未マージPR #61、
+基準mainは`9eab93c`（PR #61まで）。記号サポートもPR #61でmain統合済み。
 原文比較と診断画面は#62の未コミット作業版。現在の実機アプリがmainと同じ内容とは限らない。
 将来参照するときはPRの状態を再確認し、対象コミットを固定する。未コミットの診断変更は
 mainのcloneだけでは得られない。APIキー・ユーザー設定・入力履歴・署名秘密鍵を引き継ぎ資料へコピーしない。
@@ -122,10 +122,10 @@ Chat Completions互換形式。設定済みURLが完全な`chat/completions`で�
 
 - ユーザー辞書は`よみ = 変換後`、100件・保存文字列2,000文字まで。ただし送信合計1,000文字は別判定で、
   保存できた辞書でも変換要求が超過する場合がある。読みは小文字ASCIIの印字可能文字、空白・重複を拒否。
-- SudachiはLLMに全ひらがな単語の候補がある場合の読み検索。記号（未マージPR #61）は元入力全体から独立検索。
+- SudachiはLLMに全ひらがな単語の候補がある場合の読み検索。記号（PR #61で統合済み）は元入力全体から独立検索。
   中黒→Mozc→Sudachiで合計10件、LLM順序・現在候補・出所を維持し、本文へ注釈を混ぜない。
   索引はローカル専用で、検索のためのAPI追加要求やAPI失敗時のオフライン代替は行わない。
-- Mozcの固定元データ・生成処理・ハッシュ・LICENSEは[ThirdParty/Mozc](https://github.com/kiyoka/Sumibi-mac/blob/401507c02a04f2a025540aeca8d1bc0829683053/ThirdParty/Mozc/README.md)、
+- Mozcの固定元データ・生成処理・ハッシュ・LICENSEは[ThirdParty/Mozc](../ThirdParty/Mozc/README.md)、
   Sudachiは[ThirdParty/SudachiDict](../ThirdParty/SudachiDict/README.md)を参照する。
   データをWindowsへ同梱する場合も出典・ライセンスを落とさず、フォントや字形画像をコピーしない。
 - 接続先・モデル・辞書は明示保存。Decisions閾値・上限等は自動保存。秘密キーは設定本文と分離したOSの安全な保存先を使う。

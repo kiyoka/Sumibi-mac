@@ -8,8 +8,8 @@
 
 | 区分 | 基準 | 状態 |
 | --- | --- | --- |
-| main | `ac83ff09b1b5b640ac1d64d9066c710280c377dc` | PR #59の配布手順とPR #60のDecisions自動変換まで統合済み |
-| 記号サポート | `401507c02a04f2a025540aeca8d1bc0829683053`／[PR #61](https://github.com/kiyoka/Sumibi-mac/pull/61) | OPEN。mainへ未統合。記号入力・Undo・ライセンス表示は利用者確認済み |
+| main | `9eab93cb94b1913ffd2aeaea124992f7c74e8810` | PR #59の配布手順、PR #60のDecisions自動変換、PR #61の記号対応まで統合済み |
+| 記号サポート | `401507c02a04f2a025540aeca8d1bc0829683053`／[PR #61](https://github.com/kiyoka/Sumibi-mac/pull/61) | 2026-10-20にマージ済み。記号入力・Undo・ライセンス表示は利用者確認済み |
 | 原文比較・診断画面 | `codex/issue-62-debug-settings`の未コミット作業ツリー | #55の比較表示、#62の独立画面。main／PR #61の内容ではない |
 | 今回の資料更新 | [#63](https://github.com/kiyoka/Sumibi-mac/issues/63) | コード・設定・インストール済みアプリは変更しない |
 
@@ -23,7 +23,7 @@
 | 入力・初回変換 | 追跡文字を確定後、成功結果を範囲置換。初回1候補。選択文字列も変換可能 | [InputSession](../Sources/SumibiCore/InputSession.swift)、[InputEffectApplier](../Sources/SumibiIME/InputEffectApplier.swift) |
 | 手動変換の待機入力 | 文字・制御キーの順序付き待ち行列。対象変更では文字を救済 | 遅延したEnter等は記録のみで実際には送信しない。自動変換とは別 |
 | 追加候補 | 最大12候補を要求し、現在結果を先頭に保持。選択時だけ対象を置換 | [Conversion](../Sources/SumibiCore/Conversion.swift)、[コントローラー](../Sources/SumibiIME/SumibiInputController.swift) |
-| 辞書候補 | Sudachiの同音異義語を最大10件補足。LLM内の全ひらがな単語が検索条件 | PR #61は元入力全体からMozc記号を検索し、中黒→記号→Sudachiで合計10件。[記号仕様](https://github.com/kiyoka/Sumibi-mac/blob/401507c02a04f2a025540aeca8d1bc0829683053/docs/SYMBOL_CANDIDATES.md) |
+| 辞書候補 | 中黒→Mozc記号→Sudachiで合計最大10件。記号は元入力全体、SudachiはLLMの全ひらがな単語から検索 | PR #61でmain統合済み。[補完処理](../Sources/SumibiCore/SupplementalCandidateDictionary.swift)。[記号仕様](SYMBOL_CANDIDATES.md) |
 | Decisions | 既定オフ、独立同意、公式接続先・共有キー、閾値0.5、200ms固定窓、32状態、待機256件、10秒、通信上限10,000回 | [詳細](DECISIONS_CONVERSION.md)。Jev通信は廃止。保存済み閾値を既定値で上書きしない |
 | 自動変換中の入力 | 入力を即時処理し、古い世代の判定・変換結果は非適用 | 手動待機キーの待ち行列を流用しない。[AmbientConversionLifecycle](../Sources/SumibiIME/Conversion/AmbientConversionLifecycle.swift) |
 | 位置・内容照合 | UTF-16範囲、選択、原文、要求ID、入力先・入力活動・認可を確認。未照合なら置換しない | [TextReplacementTracker](../Sources/SumibiIME/TextReplacementTracker.swift)、[AmbientInputSnapshot](../Sources/SumibiIME/Conversion/AmbientInputSnapshot.swift) |

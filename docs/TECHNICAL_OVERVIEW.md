@@ -2,8 +2,8 @@
 
 ## 1. 文書の範囲と状態
 
-2026-10-20、Issue #63でコードと照合した実装の説明。基準mainは`ac83ff0`（PR #59／#60まで）。
-記号サポートは未マージのPR #61、原文比較・診断画面の独立化は#62の未コミット作業版として区別する。
+2026-10-20、Issue #63でコードと照合した実装の説明。基準mainは`9eab93c`（PR #59〜#61まで）。
+記号サポートはPR #61でmainへ統合済み。原文比較・診断画面の独立化は#62の未コミット作業版として区別する。
 今回は文書の更新であり、機能・保存形式・製品仕様を変更しない。
 
 [SPEC](SPEC.md)は合意した要件であり、全機能の実装完了を意味しない。本書では「実装済み」「未実装の要件」「観測・実機確認」「将来案」を分ける。仕様とコードの差、参照したコード・テストは[実装照合記録](IMPLEMENTATION_AUDIT.md)に記載する。以前の設計案と詳しいアプリ別の調査は[旧技術解説](TECHNICAL_OVERVIEW_HISTORY.md)・[Issue #4の調査記録](ISSUE_4_PROTOTYPE.md)へ保存した。
@@ -96,13 +96,13 @@ Runtimeは状態機械・範囲追跡・通信・候補表示と、最新コン�
 
 初回は1件を取得して即確定する。直後の変換キーは追加候補の通信を開始する。候補取得後に表示するので、「まず窓を開き、さらに押してから初めて追加通信する」という旧設計案とは異なる。窓が表示中の変換キーは次の候補へ巡回してその場で置換する。矢印・Enter・数字1〜9・クリックによる移動／選択、Escによる窓の解除も実装するが、キーがIMEへ届くかは入力先に依存する。
 
-追加要求のプロンプトと`ConversionMode.candidateCount`は現在結果を含む最大12件。候補は重複を除き、現在結果を先頭にする。mainでは、ひらがなだけの単語候補に[HomophoneDictionary](../Sources/SumibiCore/HomophoneDictionary.swift)から最大10件を補足する。未マージのPR #61は、元入力全体からのMozc記号検索と中黒を加え、辞書追加枠を合計10件にする。[記号仕様](https://github.com/kiyoka/Sumibi-mac/blob/401507c02a04f2a025540aeca8d1bc0829683053/docs/SYMBOL_CANDIDATES.md)を参照。出所「LLM」「辞書」は本文と分離し、辞書全体をLLMへ送信しない。仕様書の「第二候補以降10件」との差は照合記録へ残す。
+追加要求のプロンプトと`ConversionMode.candidateCount`は現在結果を含む最大12件。候補は重複を除き、現在結果を先頭にする。mainにはPR #61の記号補完も統合済み。元入力全体の読みから中黒・Mozc記号を補い、LLMの全ひらがな単語候補から[HomophoneDictionary](../Sources/SumibiCore/HomophoneDictionary.swift)を検索し、辞書追加枠を合計最大10件にする。[記号仕様](SYMBOL_CANDIDATES.md)を参照。出所「LLM」「辞書」は本文と分離し、辞書全体をLLMへ送信しない。仕様書の「第二候補以降10件」との差は照合記録へ残す。
 
 Undoは入力先の標準編集履歴へ委ねる。原文の確定と範囲指定の置換によって履歴に残す方式を採用しているが、全アプリで一回のUndoが同じ範囲を戻すという保証はしない。過去のアプリ別確認と追加の手動確認項目を区別する。
 
 ## 7. 設定・メニューバー（実装済みと未実装）
 
-[SettingsWindowController](../Sources/SumibiIME/Settings/SettingsWindowController.swift)が一つのNSWindowとNSHostingViewを保持する。mainの画面はAPI設定、送信先・料金・同意、ユーザー辞書・Decisions設定への入口、保存・APIキー削除。PR #61はMozcライセンス閲覧、#62作業版はトップの「診断・デバッグ…」を追加する。一時本文表示は明示オン・メモリ内限定・再起動後オフで、ログへ流さない。文脈・文体・変換テスト・一般的な利用状況の集計は未実装である。
+[SettingsWindowController](../Sources/SumibiIME/Settings/SettingsWindowController.swift)が一つのNSWindowとNSHostingViewを保持する。mainの画面はAPI設定、送信先・料金・同意、ユーザー辞書・Decisions設定への入口、保存・APIキー削除。mainはPR #61でMozcライセンス閲覧も追加済み。#62作業版はトップの「診断・デバッグ…」を追加する。一時本文表示は明示オン・メモリ内限定・再起動後オフで、ログへ流さない。文脈・文体・変換テスト・一般的な利用状況の集計は未実装である。
 
 送信先・モデル・辞書は[SettingsStore](../Sources/SumibiIME/Settings/SettingsStore.swift)のUserDefaults、APIキーは[APIKeyStore](../Sources/SumibiIME/Settings/APIKeyStore.swift)のKeychainへ保存する。キーは固定長の伏せ字と末尾4文字で表示し、「変更」から空の編集欄を開く。保存するまで既存キーは保持する。API入力欄は変換対象外で、辞書編集シート中だけ自アプリでの変換を許可する。
 
