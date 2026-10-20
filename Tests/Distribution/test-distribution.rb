@@ -28,7 +28,7 @@ class DistributionChecks
     FileUtils.mkdir_p(File.join(@app, 'Contents', 'MacOS'))
     FileUtils.cp(File.join(fixtures, 'FixtureInfo.plist'), File.join(@app, 'Contents', 'Info.plist'))
     File.write(File.join(@app, 'Contents', 'MacOS', 'Sumibi'), 'not an executable; test fixture only')
-    %w[AppIcon.icns InputMenuIcon.tiff MenuBarIcon.png MenuBarIcon@2x.png SudachiCandidates.tsv ja.lproj/InfoPlist.strings en.lproj/InfoPlist.strings SudachiDict/LICENSE-2.0.txt SudachiDict/LEGAL].each do |name|
+    %w[AppIcon.icns InputMenuIcon.tiff MenuBarIcon.png MenuBarIcon@2x.png SudachiCandidates.tsv MozcSymbols.tsv Mozc/LICENSE Mozc/ATTRIBUTION.txt ja.lproj/InfoPlist.strings en.lproj/InfoPlist.strings SudachiDict/LICENSE-2.0.txt SudachiDict/LEGAL].each do |name|
       path = File.join(@app, 'Contents', 'Resources', name)
       FileUtils.mkdir_p(File.dirname(path))
       File.write(path, 'fixture only')
@@ -129,14 +129,16 @@ class DistributionChecks
         File.binwrite(binary, original)
       end
     end
-    check('build-pkg rejects missing resources') do
-      resource = File.join(@app, 'Contents/Resources/SudachiCandidates.tsv')
-      original = File.binread(resource)
-      begin
-        File.unlink(resource)
-        reject('build-pkg.sh', [@app])
-      ensure
-        File.binwrite(resource, original)
+    %w[SudachiCandidates.tsv MozcSymbols.tsv Mozc/LICENSE Mozc/ATTRIBUTION.txt].each do |name|
+      check("build-pkg rejects missing resource #{name}") do
+        resource = File.join(@app, 'Contents/Resources', name)
+        original = File.binread(resource)
+        begin
+          File.unlink(resource)
+          reject('build-pkg.sh', [@app])
+        ensure
+          File.binwrite(resource, original)
+        end
       end
     end
     check('build-pkg rejects wrong Installer identity') do
