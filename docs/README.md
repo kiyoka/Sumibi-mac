@@ -10,13 +10,13 @@
 | Macの構成と入力先・非同期処理 | [技術解説](TECHNICAL_OVERVIEW.md)、[所有関係](INPUT_CONTROLLER_ARCHITECTURE.md) |
 | 自動変換・費用・競合・確認履歴 | [Decisions](DECISIONS_CONVERSION.md) |
 | 記号候補・データ生成・ライセンス | [記号](SYMBOL_CANDIDATES.md) |
-| 一時デバッグ・原文比較の使い方 | [診断画面](https://github.com/kiyoka/Sumibi-mac/issues/62)、[ログ規約](DIAGNOSTIC_LOGGING.md) |
+| 一時デバッグ・原文比較の使い方 | [診断画面](DIAGNOSTICS_SETTINGS.md)、[ログ規約](DIAGNOSTIC_LOGGING.md) |
 | 長文の制約・エラーと対処 | [長文診断](LONG_INPUT_DIAGNOSTICS.md)、[表示](CONVERSION_FEEDBACK.md) |
 | ビルドと回帰テスト | [通常／開発ビルド](BUILD_MODES.md)、[Tests](../Tests/README.md) |
 | 配布・署名・公証・残作業 | [自己配布](DIRECT_DISTRIBUTION.md)、[Developer ID](DEVELOPER_ID_DISTRIBUTION.md) |
 
-`SPEC.md`だけを実装一覧として読まない。mainは記号サポートのPR #61まで統合済み。診断独立画面は
-#62の未コミット作業版という、今回の確認時点の区分を[照合記録](IMPLEMENTATION_AUDIT.md)で確認する。
+`SPEC.md`だけを実装一覧として読まない。基準mainはPR #65まで統合済み。診断独立画面は
+#62対応ブランチの変更という区分を[照合記録](IMPLEMENTATION_AUDIT.md)で確認する。
 古いJevの資料・調査時の回避策・過去のテスト数は、現在の仕様を上書きしない。
 
 ## 変更時のメンテナンス手順

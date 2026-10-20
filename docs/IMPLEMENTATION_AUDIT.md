@@ -8,10 +8,10 @@
 
 | 区分 | 基準 | 状態 |
 | --- | --- | --- |
-| main | `9eab93cb94b1913ffd2aeaea124992f7c74e8810` | PR #59の配布手順、PR #60のDecisions自動変換、PR #61の記号対応まで統合済み |
+| 基準main | `d2b96fc2d2e7bf08a597e2ba46132712b6785d93` | PR #59〜#61の実装とPR #65の仕様資料まで統合済み |
 | 記号サポート | `401507c02a04f2a025540aeca8d1bc0829683053`／[PR #61](https://github.com/kiyoka/Sumibi-mac/pull/61) | 2026-10-20にマージ済み。記号入力・Undo・ライセンス表示は利用者確認済み |
-| 原文比較・診断画面 | `codex/issue-62-debug-settings`の未コミット作業ツリー | #55の比較表示、#62の独立画面。main／PR #61の内容ではない |
-| 今回の資料更新 | [#63](https://github.com/kiyoka/Sumibi-mac/issues/63) | コード・設定・インストール済みアプリは変更しない |
+| 原文比較・診断画面 | `codex/issue-62-diagnostics-settings` | #55の比較表示、#62の独立画面を本ブランチに収録。基準mainには未統合 |
+| 仕様資料 | [#63](https://github.com/kiyoka/Sumibi-mac/issues/63)／PR #65 | mainへ統合済み。本ブランチでは#62の画面移動に追従 |
 
 作業版を通常版として実機へ更新した履歴は、公開版・main統合・リリース完了を意味しない。
 `App/Info.plist`は **0.4／build 4**。#57の0.9.0は目標で、まだ版数を変更していない。
@@ -29,7 +29,7 @@
 | 位置・内容照合 | UTF-16範囲、選択、原文、要求ID、入力先・入力活動・認可を確認。未照合なら置換しない | [TextReplacementTracker](../Sources/SumibiIME/TextReplacementTracker.swift)、[AmbientInputSnapshot](../Sources/SumibiIME/Conversion/AmbientInputSnapshot.swift) |
 | 読取待機 | 自動変換の確定原文を最大0.5秒読取確認、置換後の結果も読取だけ再確認 | API再送・全文探索・再書込ではない。恒久的な読取制約は解消しない |
 | 状態・エラー | メニューバーの処理印、固定原因・対処・明示解除。カーソル付近の短時間チェック／赤い! | [表示](CONVERSION_FEEDBACK.md)。直近のスコアは現在入力の成功保証ではない |
-| 一時デバッグ | 明示オン時の原文・確定前後の取得文字列をメモリ内表示。再起動後オフ | 作業版は観測時の比較を追加し、設定トップへ移動。[#62の仕様](https://github.com/kiyoka/Sumibi-mac/issues/62) |
+| 一時デバッグ | 明示オン時の原文・確定前後の取得文字列をメモリ内表示。再起動後オフ | 本ブランチは観測時の比較を追加し、設定トップへ移動。[#62の仕様](DIAGNOSTICS_SETTINGS.md) |
 | 保存・同意 | 接続先・モデル・辞書はUserDefaults、キーはKeychain。変換同意は接続先文字列ごと | [SettingsStore](../Sources/SumibiIME/Settings/SettingsStore.swift)、[APIKeyStore](../Sources/SumibiIME/Settings/APIKeyStore.swift) |
 | 周辺文脈等 | 周辺文脈・文体指示・設定画面の変換テスト・一般的なトークン／料金集計は未実装 | Decisionsの回数制限は、請求額や変換API全体の利用額表示とは別 |
 | 配布 | 単一アプリ、ユーザー本人のみ。Developer ID署名・公証用スクリプトはPR #59でmain統合済み | 検証用pkgの実署名・公証は成功。新規導入・更新・削除のpkg実機検証は未完了 |
@@ -53,11 +53,11 @@
 
 ## 検証の根拠と限界
 
-- 最新の実行記録（2026-10-18の#62作業版）：通常・開発構成それぞれCore 102件＋IME 228件＝330件。
+- 最新の実行記録（2026-10-20の#62ブランチ）：通常・開発構成それぞれCore 102件＋IME 228件＝330件。
   329件成功、実60秒タイムアウト1件は明示スキップ。main単体の件数ではない。
 - #58作業版：生成処理3件、配布手順の模擬検査31項目、固定元データからの再生成一致、索引・ライセンス同梱を確認。
 - 模擬通信・模擬Keychain・専用UserDefaultsを使い、本人のキーや実APIを自動テストで使用しない。
-  今回は文書更新であり、これらの機能テストを新たに実行したとは記録しない。
+  #62の本ブランチでの再検証結果は[診断画面](DIAGNOSTICS_SETTINGS.md)に記録する。
 - 利用者はDecisions版のCodexで短文変換・1回のUndo・追加入力・左矢印・Esc・他アプリ切替・Ctrl＋Jとの競合を確認。
   報告時点と限定条件は[詳細履歴](DECISIONS_CONVERSION.md)を参照する。
 - 記号★・①・中黒とUndo、Mozcライセンス全文の表示は利用者確認済み。入力先アプリ名は再明示されていない。

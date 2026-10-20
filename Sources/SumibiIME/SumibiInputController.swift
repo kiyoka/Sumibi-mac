@@ -497,6 +497,7 @@ final class SumibiInputController: IMKInputController {
         let snapshot: AmbientInputSnapshot
         var rejectedRanges: AmbientRangeReport?
         var sourceReadReport: AmbientSourceReadReport?
+        var observationText: AmbientObservationTextReport?
         switch AmbientInputSnapshot.capture(source: state.marked, input: IMKInputClient(input),
             allowUnreadableComposition: true,
             onRanges: { rejectedRanges = $0 },
@@ -504,11 +505,12 @@ final class SumibiInputController: IMKInputController {
             onSourceRead: { ranges, length in
                 rejectedRanges = ranges
                 sourceReadReport = AmbientSourceReadReport(requestedLength: ranges.marked.length, returnedLength: length)
-            }) {
+            }, onSourceText: runtime.ambient.debugTextEnabled ? { observationText = $0 } : nil) {
         case .success(let captured): snapshot = captured
         case .failure(let reason):
             runtime.ambient.skipObservation(reason, ranges: rejectedRanges, sourceRead: sourceReadReport,
-                sourceCharacters: state.marked.count, sourceUTF16: state.marked.utf16.count); return
+                sourceCharacters: state.marked.count, sourceUTF16: state.marked.utf16.count,
+                debugText: observationText); return
         }
         guard let observation = DecisionsObservation(text: snapshot.source, latestKey: latestKey,
                                                maximumCharacters: settings.maximumCharacters) else {
@@ -527,14 +529,15 @@ final class SumibiInputController: IMKInputController {
                   let current = controller.liveInput(), !controller.isExcluded(current),
                   ObjectIdentifier(current as AnyObject) == route else { return false }
             var sourceRead: AmbientSourceReadReport?
+            var observationText: AmbientObservationTextReport?
             if let failure = snapshot.validationFailure(in: IMKInputClient(current), onSourceRead: { length in
                 sourceRead = AmbientSourceReadReport(requestedLength: snapshot.marked.length, returnedLength: length)
-            }) {
+            }, onSourceText: runtime.ambient.debugTextEnabled ? { observationText = $0 } : nil) {
                 if failure != .targetChanged {
                     runtime.ambient.skipObservation(failure,
                         ranges: AmbientRangeReport(marked: snapshot.marked, selection: snapshot.selection),
                         sourceRead: sourceRead, sourceCharacters: snapshot.source.count,
-                        sourceUTF16: snapshot.source.utf16.count)
+                        sourceUTF16: snapshot.source.utf16.count, debugText: observationText)
                 }
                 return false
             }
