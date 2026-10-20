@@ -2,7 +2,9 @@
 
 ## 1. 文書の範囲と状態
 
-2026-10-04、mainの`9baac75`（PR #51まで）をコードと照合した現行実装の説明。Issue #48では機能・保存形式・製品仕様を変更しない。
+2026-10-20、Issue #63でコードと照合した実装の説明。基準mainは`ac83ff0`（PR #59／#60まで）。
+記号サポートは未マージのPR #61、原文比較・診断画面の独立化は#62の未コミット作業版として区別する。
+今回は文書の更新であり、機能・保存形式・製品仕様を変更しない。
 
 [SPEC](SPEC.md)は合意した要件であり、全機能の実装完了を意味しない。本書では「実装済み」「未実装の要件」「観測・実機確認」「将来案」を分ける。仕様とコードの差、参照したコード・テストは[実装照合記録](IMPLEMENTATION_AUDIT.md)に記載する。以前の設計案と詳しいアプリ別の調査は[旧技術解説](TECHNICAL_OVERVIEW_HISTORY.md)・[Issue #4の調査記録](ISSUE_4_PROTOTYPE.md)へ保存した。
 
@@ -18,9 +20,13 @@ Sumibi.app / 実行ファイル Sumibi
 │     ├─ InputSession: 追跡文字列・要求ID・待機キー・候補
 │     ├─ TextReplacementTracker: 範囲と原文の照合
 │     ├─ ConversionLifecycle: 通信・応答・反映待ちタイマー
+│     ├─ AmbientConversionLifecycle: Decisions集約・判定・変換・読取確認
+│     ├─ ConversionResultVerifier: 手動置換後の読取確認
+│     ├─ ConversionFeedback / CaretDecisionCue: 固定エラー・短時間の状態印
 │     └─ CandidatePresenter → CandidateWindow: 独自候補窓
 ├─ MenuBarController: NSStatusItem・ログイン項目
-└─ SettingsWindowController → APISettingsView: SwiftUI設定画面
+└─ SettingsWindowController → APISettingsView: SwiftUI設定・辞書・Decisions
+   └─ DiagnosticsSettingsView: 独立した一時デバッグ（#62作業版）
 ```
 
 通常起動は[SumibiMain](../Sources/SumibiIME/SumibiMain.swift)がInfo.plistのBundle IDと接続名からIMKServerを作り、その寿命をイベントループ中保持する。同じプロセスでメニューバーを設置し、設定ウィンドウを必要時に開く。別の設定アプリ・常駐ヘルパー・App Groupは現行構成にない。別アプリへの分離は将来再設計する場合の案であり、配布の成立条件ではない。
@@ -57,7 +63,24 @@ Runtimeは状態機械・範囲追跡・通信・候補表示と、最新コン�
 
 選択範囲の変換は、追跡中の原文や安全に再変換できる直前結果がないとき、選択文字列を取得して同じ変換経路を使う。まず選択範囲を同じ文字列で確定し、応答時に照合してその範囲だけを置換する。
 
+### 4.1 Decisions自動変換（mainへ統合済み）
+
+[AmbientConversionLifecycle](../Sources/SumibiIME/Conversion/AmbientConversionLifecycle.swift)が
+未確定入力を200msの固定窓で保持し、最大32状態を名前付きpredicate質問として判定する。
+モデルは`gpt-6-luna`、既定閾値0.5、判定タイムアウト10秒。既定オフで、親画面の変換同意と
+独立した自動送信同意、公式OpenAI接続先と共有キーが必要。旧Jev通信は廃止した。
+
+自動変換中の入力は即時処理し、古い結果を世代・原文・対象で照合して破棄する。
+判定・漢字変換・読取確認を直列化し、未送信256状態、累積通信10,000回という別の上限を持つ。
+確定原文と置換結果の読取だけをそれぞれ最大0.5秒確認し、API再送や未照合の書込は行わない。
+原文確認は単調時計の期限付きだが、結果確認は100ms×最大5回という試行数による制限で、
+スケジューラー遅延を含む厳密な実時間上限ではない。この差も移植時に引き継ぐ。
+カーソル移動前には原文を確定し、待機と追跡を取り消す。macOSの再生成対策・相対座標の許容条件を
+別OSの保証としない。詳細な状態・費用・実機履歴は[Decisions自動変換](DECISIONS_CONVERSION.md)を参照。
+
 ## 5. 待機入力・Esc・救済
+
+この節の待機キーは手動変換の動作であり、Decisions自動変換中は入力を待ち行列へ蓄積しない。
 
 応答待ち中の文字・Enter・Backspace・変換キーはCoreの順序付き待ち行列へ入る。通信完了後、元の対象を照合してCoreが順に処理する。追加入力は文字列へ反映され、次の変換が始まると排出を止める。追加候補取得だけを繰り返す連打は抑制する。
 
@@ -73,13 +96,13 @@ Runtimeは状態機械・範囲追跡・通信・候補表示と、最新コン�
 
 初回は1件を取得して即確定する。直後の変換キーは追加候補の通信を開始する。候補取得後に表示するので、「まず窓を開き、さらに押してから初めて追加通信する」という旧設計案とは異なる。窓が表示中の変換キーは次の候補へ巡回してその場で置換する。矢印・Enter・数字1〜9・クリックによる移動／選択、Escによる窓の解除も実装するが、キーがIMEへ届くかは入力先に依存する。
 
-追加要求のプロンプトと`ConversionMode.candidateCount`は現在結果を含む最大12件。候補は重複を除き、現在結果を先頭にする。ひらがなだけの単語候補には[HomophoneDictionary](../Sources/SumibiCore/HomophoneDictionary.swift)のローカル索引から最大10件を補足し、出所を「LLM」「辞書」として表示する。辞書全体はLLMへ送信しない。仕様書の「第二候補以降10件」との差は照合記録へ残し、仕様を書き換えて追認しない。
+追加要求のプロンプトと`ConversionMode.candidateCount`は現在結果を含む最大12件。候補は重複を除き、現在結果を先頭にする。mainでは、ひらがなだけの単語候補に[HomophoneDictionary](../Sources/SumibiCore/HomophoneDictionary.swift)から最大10件を補足する。未マージのPR #61は、元入力全体からのMozc記号検索と中黒を加え、辞書追加枠を合計10件にする。[記号仕様](https://github.com/kiyoka/Sumibi-mac/blob/401507c02a04f2a025540aeca8d1bc0829683053/docs/SYMBOL_CANDIDATES.md)を参照。出所「LLM」「辞書」は本文と分離し、辞書全体をLLMへ送信しない。仕様書の「第二候補以降10件」との差は照合記録へ残す。
 
 Undoは入力先の標準編集履歴へ委ねる。原文の確定と範囲指定の置換によって履歴に残す方式を採用しているが、全アプリで一回のUndoが同じ範囲を戻すという保証はしない。過去のアプリ別確認と追加の手動確認項目を区別する。
 
 ## 7. 設定・メニューバー（実装済みと未実装）
 
-[SettingsWindowController](../Sources/SumibiIME/Settings/SettingsWindowController.swift)が一つのNSWindowとNSHostingViewを保持する。現在の画面はAPI設定、送信先・料金・同意の説明、ユーザー辞書への入口、保存・APIキー削除。文脈スイッチ・文体プリセット・設定画面の変換テスト・利用状況の集計は未実装の要件である。
+[SettingsWindowController](../Sources/SumibiIME/Settings/SettingsWindowController.swift)が一つのNSWindowとNSHostingViewを保持する。mainの画面はAPI設定、送信先・料金・同意、ユーザー辞書・Decisions設定への入口、保存・APIキー削除。PR #61はMozcライセンス閲覧、#62作業版はトップの「診断・デバッグ…」を追加する。一時本文表示は明示オン・メモリ内限定・再起動後オフで、ログへ流さない。文脈・文体・変換テスト・一般的な利用状況の集計は未実装である。
 
 送信先・モデル・辞書は[SettingsStore](../Sources/SumibiIME/Settings/SettingsStore.swift)のUserDefaults、APIキーは[APIKeyStore](../Sources/SumibiIME/Settings/APIKeyStore.swift)のKeychainへ保存する。キーは固定長の伏せ字と末尾4文字で表示し、「変更」から空の編集欄を開く。保存するまで既存キーは保持する。API入力欄は変換対象外で、辞書編集シート中だけ自アプリでの変換を許可する。
 
@@ -91,8 +114,8 @@ Undoは入力先の標準編集履歴へ委ねる。原文の確定と範囲指�
 
 現行ビルドはSwift Packageから単一のSumibi.appを組み立てる。[App/build.sh](../App/build.sh)はインストールしない。利用者が選んだ導入範囲は**インストールしたユーザーのみ**、配置先は`~/Library/Input Methods/Sumibi.app`。全ユーザー用を並列の未決案として扱わない。
 
-Developer ID署名・公証済みpkg、GitHub ReleasesとPagesからの案内は配布方針であり、公開済みの成果物ではない。2026-10-15の#15作業版は旧ローカルコミット`c027ccf`の配布スクリプトを取り込み、現在の通常版ビルドに対応した。mainには未統合。開発署名のビルド・実機更新、模擬配布テストと、実署名／公証／新規導入は別の確認である。[配布資料](DIRECT_DISTRIBUTION.md)を参照。
+配布用スクリプトは2026-10-17にPR #59でmainへ統合済み。0.4／build 4／arm64の検証用pkgは実Developer ID署名・Apple公証・チケット添付・Gatekeeper検査に成功したが、新規導入・更新・削除のpkg実機確認は未完了。開発署名による通常版の実機入替とも、0.9.0リリースの完成とも区別する。[配布資料](DIRECT_DISTRIBUTION.md)を参照。
 
-現行自動テストは通常・開発構成それぞれ138件。#47通常版への更新では、利用者が通常変換・候補選択・Escと、設定・辞書・保存済みAPIキーの保持に問題がないことを確認した。#45ではCodexアプリ内も確認済み。ただし未指定のアプリやOSへ一般化しない。入力先切替・通信待ちなどの残る実機項目は[Tests/README](../Tests/README.md)へ残す。
+最新の実行記録は2026-10-18の#62作業版で通常・開発各330件（329件成功・実60秒タイムアウト1件スキップ）。main単体の件数ではない。手動・Decisions・記号の利用者確認は[照合記録](IMPLEMENTATION_AUDIT.md)と[Tests/README](../Tests/README.md)を参照。模擬入力・特定アプリの合格を、未指定のアプリ・OS・Undo全経路へ一般化しない。
 
 Chromium系入力欄の長文読取制限（#41）は未解消。1000文字制限とは別の入力先側の制約であり、今回の整理で長文変換が保証されるとは扱わない。Codex CLIなど未確認のTUIも検証済みに含めない。
