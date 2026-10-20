@@ -60,6 +60,7 @@ final class AmbientConversionLifecycle {
     private(set) var debugTextEnabled = false
     private(set) var lastCommitText: AmbientCommitTextReport?
     private(set) var lastResultText: AmbientResultTextReport?
+    private(set) var lastObservationText: AmbientObservationTextReport?
     private var lastResultReadback: ConversionResultReadback?
     private var expectedResultUTF16: Int?
     var lastDecision: DecisionsDecisionReport? { feedback.lastDecisionsDecision }
@@ -77,6 +78,7 @@ final class AmbientConversionLifecycle {
 
     func observe(_ target: Target) {
         dismissCue()
+        lastObservationText = nil
         lastObservationBlock = nil
         lastObservationRanges = nil
         lastSourceReadReport = nil
@@ -152,13 +154,17 @@ final class AmbientConversionLifecycle {
         lastCommitReport = nil
         lastCommitText = nil
         lastResultText = nil
+        lastObservationText = nil
         lastResultReadback = nil; expectedResultUTF16 = nil
     }
 
     func skipObservation(_ reason: AmbientObservationBlock, ranges: AmbientRangeReport? = nil,
                          sourceRead: AmbientSourceReadReport? = nil,
-                         sourceCharacters: Int? = nil, sourceUTF16: Int? = nil) {
+                         sourceCharacters: Int? = nil, sourceUTF16: Int? = nil,
+                         debugText: AmbientObservationTextReport? = nil) {
         stop()
+        lastObservationText = debugTextEnabled && (reason == .sourceMismatch || reason == .sourceUnavailable)
+            ? debugText : nil
         lastObservationBlock = reason
         lastObservationRanges = ranges
         lastSourceReadReport = sourceRead
@@ -178,6 +184,7 @@ final class AmbientConversionLifecycle {
     }
 
     func beginDeliveryAttempt() {
+        lastObservationText = nil
         lastDeliveryFailure = nil; lastCommitReport = nil; lastCommitText = nil; lastResultText = nil
         lastResultReadback = nil; expectedResultUTF16 = nil
     }
@@ -188,6 +195,7 @@ final class AmbientConversionLifecycle {
     }
     func setDebugTextEnabled(_ enabled: Bool) {
         debugTextEnabled = enabled; lastCommitText = nil; lastResultText = nil
+        lastObservationText = nil
     }
     func recordCommitText(_ report: AmbientCommitTextReport) {
         guard debugTextEnabled else { return }
@@ -416,6 +424,7 @@ final class AmbientConversionLifecycle {
     }
 
     private func didApply() {
+        lastObservationText = nil
         lastError = nil
         lastDeliveryFailure = nil
         lastCommitReport = nil
