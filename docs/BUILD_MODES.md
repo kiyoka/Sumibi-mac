@@ -56,6 +56,10 @@ defaults delete org.sumibi.inputmethod.Sumibi PrototypeResponseMode
 
 ## 互換性と確認
 
+最新の実行記録（2026-10-18、#62作業版）は通常・開発各330件、329件成功・実60秒タイムアウト1件スキップ。
+下記の138件と#47実機結果は当時の履歴であり、mainの現在の件数ではない。
+配布スクリプトは2026-10-17にPR #59でmainへ統合済み。[現行照合](IMPLEMENTATION_AUDIT.md)を参照。
+
 Bundle ID `org.sumibi.inputmethod.Sumibi`、日本語入力ソースID `org.sumibi.inputmethod.Sumibi.Japanese`、接続名`org.sumibi.inputmethod.Sumibi_Connection`、実行ファイル名`Sumibi`を変更しない。UserDefaultsのキー・保存形式、ユーザー辞書、Keychainサービス`org.sumibi.Sumibi-mac.api-key`とaccount `default`も変更しない。
 
 Swiftのクラス名は整理するが、登録済みIMKのObjective-C名`SumibiPrototypeInputController`は残す。旧設定移行の`prototypeDomain`・`importPrototypeSettingsIfNeeded`は実際の試作版からの移行を表すため残し、移行元`dev.kiyoka.inputmethod.SumibiPrototypeProbe1`も変更しない。
