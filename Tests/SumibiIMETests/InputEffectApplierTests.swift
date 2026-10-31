@@ -1223,6 +1223,97 @@ final class InputEffectApplierTests: XCTestCase {
         XCTAssertTrue(input.writes.isEmpty)
     }
 
+    func testPrematureClientCompositionEndDoesNotDuplicateCommitOnStartFirst() {
+        let runtime = isolatedRuntime()
+        let input = RecordingInputClient()
+        let applier = applier(runtime) { _, _ in }
+        _ = applier.apply(runtime.state.receive(.text("nihongo")), to: input)
+        XCTAssertEqual(input.text, "nihongo")
+        XCTAssertEqual(runtime.lastMarkedStart, 0)
+        // Simulate client ending its composition early while "nihongo" is committed at 0.
+        input.insertText("nihongo", replacementRange: NSRange(location: 0, length: 7))
+        XCTAssertEqual(input.text, "nihongo")
+        XCTAssertEqual(input.markedRange().location, NSNotFound)
+        XCTAssertEqual(input.selectedRange(), NSRange(location: 7, length: 0))
+
+        // startFirst should recognize "nihongo" is already committed and anchor at 7
+        _ = applier.apply(runtime.state.receive(.convert), to: input)
+        XCTAssertEqual(input.text, "nihongo")
+        XCTAssertEqual(runtime.replacement.anchor?.range, NSRange(location: 0, length: 7))
+
+        // When conversion completes, replacement replaces "nihongo" with "日本語"
+        _ = applier.apply([.replacePrevious(from: "nihongo", to: "日本語")], to: input)
+        XCTAssertEqual(input.text, "日本語")
+    }
+
+    func testReentrantCommitDuringStartFirstDoesNotDoubleCommit() {
+        let runtime = isolatedRuntime()
+        let input = RecordingInputClient()
+        let applier = applier(runtime) { _, _ in }
+        _ = applier.apply(runtime.state.receive(.text("nihongo")), to: input)
+        XCTAssertEqual(input.text, "nihongo")
+        input.onInsert = {
+            XCTAssertTrue(runtime.originalCommitted)
+        }
+        _ = applier.apply(runtime.state.receive(.convert), to: input)
+        XCTAssertEqual(input.text, "nihongo")
+    }
+
+    func testClientDuplicatingOnCommitIsDetectedAndDoesNotAnchorOrReplaceSecondCopy() {
+        let runtime = isolatedRuntime()
+        let input = RecordingInputClient()
+        let applier = applier(runtime) { _, _ in }
+        _ = applier.apply(runtime.state.receive(.text("nihongo")), to: input)
+        input.onInsert = {
+            input.text = "nihongonihongo"
+            input.selection = NSRange(location: 14, length: 0)
+        }
+        _ = applier.apply(runtime.state.receive(.convert), to: input)
+        XCTAssertNil(runtime.replacement.anchor)
+
+        var rejected = false
+        var testApplier = applier
+        testApplier.onReplacementRejected = { _ in rejected = true }
+        _ = testApplier.apply([.replacePrevious(from: "nihongo", to: "日本語")], to: input)
+        XCTAssertTrue(rejected)
+        XCTAssertEqual(input.text, "nihongonihongo")
+    }
+
+    func testReplacePreviousRefusesToWriteWhileClientIsMarked() {
+        let runtime = isolatedRuntime()
+        let input = RecordingInputClient(text: "nihongo")
+        runtime.replacement.anchor = ReplacementAnchor(end: 7, text: "nihongo")
+        input.setMarkedText("nihongo", selectionRange: NSRange(location: 7, length: 0),
+                            replacementRange: NSRange(location: 0, length: 7))
+        XCTAssertNotEqual(input.markedRange().location, NSNotFound)
+
+        var rejected = false
+        var testApplier = applier(runtime)
+        testApplier.onReplacementRejected = { _ in rejected = true }
+        _ = testApplier.apply([.replacePrevious(from: "nihongo", to: "日本語")], to: input)
+        XCTAssertTrue(rejected)
+        XCTAssertEqual(input.text, "nihongo")
+    }
+
+    func testResultVerificationDetectsAppendedResultInsteadOfSilentlyCancelling() {
+        let runtime = isolatedRuntime()
+        let input = RecordingInputClient(text: "nihongo日本語")
+        // "nihongo" (7) was supposed to be replaced at (0, 7) by "日本語" (3).
+        // If client appended "日本語" instead of replacing, caret is at 0 + 7 + 3 = 10.
+        input.selection = NSRange(location: 10, length: 0)
+        _ = runtime.state.receive(.text("nihongo"))
+        _ = runtime.state.receive(.convert)
+        let id = runtime.state.pending!.id
+        _ = runtime.state.completeFirst(id: id, result: "日本語")
+        runtime.replacement.anchor = ReplacementAnchor(end: 3, text: "日本語")
+        let verification = AmbientResultVerification(expected: "日本語", range: NSRange(location: 0, length: 3),
+            selectionAtWrite: NSRange(location: 7, length: 0), sourceUTF16: 7)
+        // isCurrent MUST remain true so verification is not silently cancelled!
+        XCTAssertTrue(verification.isCurrent(runtime: runtime, input: input))
+        // readback reads range (0, 3) which is "nih" -> reports mismatch!
+        XCTAssertEqual(verification.readback(input), .mismatch)
+    }
+
     private func applier(_ runtime: InputRuntime,
                          start: @escaping (Int, ConversionRequest) -> Void = { _, _ in }) -> InputEffectApplier {
         InputEffectApplier(runtime: runtime, startConversion: start, pokeClient: { _ in }, selectCandidate: { _ in })

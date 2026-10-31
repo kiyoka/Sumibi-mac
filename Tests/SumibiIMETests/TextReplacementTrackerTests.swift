@@ -123,6 +123,30 @@ final class TextReplacementTrackerTests: XCTestCase {
         XCTAssertEqual(tracker.pendingFailure(request, in: document.input), .trackingUnavailable)
     }
 
+    func testDuplicatedSourceAfterAnchorPreventsReanchoringOntoSecondCopy() {
+        let (tracker, request) = pendingFirst(source: "nihongo", caret: 7)
+        let document = ReplacementDocument("nihongonihongo", selection: NSRange(location: 14, length: 0))
+        tracker.reanchorIfCaretLagged(request, in: document.input)
+        XCTAssertNil(tracker.anchor)
+
+        tracker.anchor = ReplacementAnchor(end: 7, text: "nihongo")
+        tracker.reanchorAtCaret(request, in: document.input)
+        XCTAssertNil(tracker.anchor)
+
+        tracker.anchor = ReplacementAnchor(end: 7, text: "nihongo")
+        XCTAssertFalse(tracker.validatesAnchor(in: document.input, expected: "nihongo"))
+    }
+
+    func testDelayedSelectionCollapseFromMarkedRangeDoesNotFailTargetValidation() {
+        let (tracker, request) = pendingFirst(source: "nihongo", caret: 7)
+        // Target selection was captured as (0, 7) when client lagged selection
+        tracker.pendingTarget = PendingTarget(requestID: request.id, selection: NSRange(location: 0, length: 7),
+                                              expectedText: "nihongo", kind: .first)
+        // By the time response arrives, client collapsed selection to (7, 0)
+        let document = ReplacementDocument("nihongo", selection: NSRange(location: 7, length: 0))
+        XCTAssertTrue(tracker.validatesPendingTarget(request, in: document.input))
+    }
+
     private func pendingFirst(source: String, caret: Int) -> (TextReplacementTracker, PendingRequest) {
         let session = InputSession()
         _ = session.receive(.text(source))

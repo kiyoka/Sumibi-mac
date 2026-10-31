@@ -26,6 +26,7 @@ final class InputRuntime {
     var isEditingUserDictionary = false
     var selectionRange: NSRange?
     var originalCommitted = false
+    var lastMarkedStart: Int?
     /// A committed-source read wait, not a manual request whose keys may be queued.
     var awaitingAmbientSourceID: Int?
     var commandTapTimer: DispatchSourceTimer?
@@ -63,6 +64,7 @@ final class InputRuntime {
 
     /// Shared cancellation path used by the IMK adapter and fake-client regression tests.
     func cancelComposition() -> [SessionEffect] {
+        lastMarkedStart = nil
         awaitingAmbientSourceID = nil
         resultVerifier.cancel()
         ambient.stop()
@@ -78,6 +80,7 @@ final class InputRuntime {
     }
 
     func cancelForTargetChange(rescueMarked: Bool = true) {
+        lastMarkedStart = nil
         awaitingAmbientSourceID = nil
         resultVerifier.cancel()
         ambient.stop()
@@ -89,5 +92,18 @@ final class InputRuntime {
         for case .rescueText(let text) in effects { rescuedText += text }
         replacement.anchor = nil
         replacement.pendingTarget = nil
+    }
+
+    func isMarkedTextAlreadyCommitted(_ text: String, in input: any InputClient) -> Bool {
+        guard let start = lastMarkedStart, start != NSNotFound, start >= 0 else { return false }
+        let len = text.utf16.count
+        guard len > 0 else { return false }
+        let marked = input.markedRange()
+        guard marked.location == NSNotFound || marked.length == 0 else { return false }
+        let selection = input.selectedRange()
+        let expectedRange = NSRange(location: start, length: len)
+        let caretAtEnd = selection == NSRange(location: start + len, length: 0)
+        guard caretAtEnd || selection == expectedRange else { return false }
+        return input.attributedSubstring(from: expectedRange)?.string == text
     }
 }
