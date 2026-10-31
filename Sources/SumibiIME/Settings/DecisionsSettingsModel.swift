@@ -27,21 +27,22 @@ final class DecisionsSettingsModel {
     func reload() {
         statusMessage = ""; statusIsError = false
         saved = store.load(); settings = saved; storedKeyDisplay = nil
-        guard DecisionsCoordinator.isOfficialOpenAI(manual.loadProviderConfiguration().endpoint) else {
+        let provider = manual.loadProviderConfiguration()
+        guard provider.provider == .openAI, DecisionsCoordinator.isOfficialOpenAI(provider.endpoint) else {
             report(DecisionsError.unsupportedProvider.message, error: true); return
         }
-        do { storedKeyDisplay = try keys.load().flatMap { APIKeyDisplay.masked(for: $0) } }
+        do { storedKeyDisplay = try keys.load(for: provider.endpoint, settings: manual).flatMap { APIKeyDisplay.masked(for: $0) } }
         catch { report("OpenAI用APIキーを読み出せませんでした。親画面のキーとKeychainアクセスを確認してください。", error: true) }
     }
 
     func setEnabled(_ enabled: Bool) {
         if enabled {
             let provider = manual.loadProviderConfiguration()
-            guard DecisionsCoordinator.isOfficialOpenAI(provider.endpoint) else {
+            guard provider.provider == .openAI, DecisionsCoordinator.isOfficialOpenAI(provider.endpoint) else {
                 report(DecisionsError.unsupportedProvider.message, error: true); return
             }
             guard saved.consent, manual.hasConsent(for: provider.endpoint),
-                  let key = try? keys.load(), APIKeyDisplay.isAcceptable(key) else {
+                  let key = try? keys.load(for: provider.endpoint, settings: manual), APIKeyDisplay.isAcceptable(key) else {
                 report("親画面でOpenAIキーと変換への送信同意を設定し、この画面でも自動送信に同意してください。", error: true); return
             }
         }

@@ -23,7 +23,7 @@ struct DecisionsSettingsView: View {
                     Text("モデル：gpt-6-luna")
                     LabeledContent("変換用OpenAIキー", value: model.storedKeyDisplay ?? "未設定")
                         .monospaced().privacySensitive()
-                    Text("親画面の変換用APIキーを使います。APIのURLは公式OpenAI（https://api.openai.com）にしてください。キーの保存・変更は親画面で行います。旧Jev用キーは使用しません。")
+                    Text("親画面の変換用APIキーを使います。接続先はOpenAI（https://api.openai.com）にしてください（Googleや「その他」では使えません）。キーの保存・変更は親画面で行います。旧Jev用キーは使用しません。")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("送信と料金への同意") {

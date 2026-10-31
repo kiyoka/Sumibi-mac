@@ -52,7 +52,7 @@ struct ConversionCoordinator {
         guard let endpoint = URL(string: configuration.endpoint), endpoint.host() != nil else {
             throw ConversionError.invalidEndpoint
         }
-        guard let apiKey = try? keys.load(), !apiKey.isEmpty else {
+        guard let apiKey = try? keys.load(for: configuration.endpoint, settings: settings), !apiKey.isEmpty else {
             throw ConversionError.apiKeyMissing
         }
         guard settings.hasConsent(for: configuration.endpoint) else {
@@ -70,7 +70,17 @@ struct ConversionCoordinator {
     func convert(_ request: ConversionRequest) async -> Result<ConversionResult, ConversionError> {
         do {
             try ConversionLimit.check(request)
+            let configuration = settings.loadProviderConfiguration()
             let result = try await service().convert(request)
+            if let usage = result.usage {
+                let recordedModel: String
+                if let returned = result.model?.trimmingCharacters(in: .whitespacesAndNewlines), !returned.isEmpty {
+                    recordedModel = returned
+                } else {
+                    recordedModel = configuration.model
+                }
+                settings.recordUsage(usage, model: recordedModel, provider: configuration.provider)
+            }
             guard request.mode == .alternatives else {
                 return .success(result)
             }

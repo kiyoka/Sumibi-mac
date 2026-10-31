@@ -90,6 +90,34 @@ final class DecisionsCoordinatorTests: XCTestCase {
         }
     }
 
+    func testGoogleProviderIsRejectedBeforeReadingAnyKeyAndInvalidatesPreparedWorkOnSwitch() throws {
+        let f = try make()
+        let work = try f.coordinator().prepare(observation: f.observation, settings: f.store.load())
+        XCTAssertTrue(work.remainsAuthorized())
+
+        // Reset recorded key calls and switch to Google while Decisions remains enabled.
+        f.decisionsKeys.calls = []
+        f.manualKeys.calls = []
+        let google = ProviderConfiguration(
+            provider: .google,
+            endpoint: AIProvider.google.defaultEndpoint,
+            model: GeminiModelOption.quality.rawValue
+        )
+        try f.manual.saveProviderConfiguration(google)
+        f.manual.saveConsent(for: google.endpoint)
+
+        // Previously prepared work is immediately invalidated.
+        XCTAssertFalse(work.remainsAuthorized())
+
+        // New prepare attempt is rejected before reading Google's key or reserving calls.
+        XCTAssertThrowsError(try f.coordinator().prepare(observation: f.observation, settings: f.store.load())) {
+            XCTAssertEqual($0 as? DecisionsError, .unsupportedProvider)
+        }
+        XCTAssertTrue(f.decisionsKeys.calls.isEmpty)
+        XCTAssertTrue(f.manualKeys.calls.isEmpty)
+        XCTAssertEqual(f.store.calls, 0)
+    }
+
     func testPreparedConversionUsesExistingProviderAndStripsTriggerPunctuation() async throws {
         let f = try make()
         let work = try f.coordinator().prepare(observation: f.observation, settings: f.store.load())

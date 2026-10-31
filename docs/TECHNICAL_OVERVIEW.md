@@ -120,9 +120,9 @@ flowchart TB
 | 情報 | プロセス内メモリ／表示 | 永続保存・外部への境界 |
 | --- | --- | --- |
 | 原文・待機入力・候補・救済文字 | InputSession、Runtime、通信／反映待ち、候補UI | 通常ログ・設定へ保存しない。変換対象は同意した変換APIへ送る。救済文字のコピーだけ利用者操作でクリップボードへ書く |
-| 接続先・モデル・送信先ごとの同意・登録ユーザー辞書 | 設定UI、ConversionCoordinator | SettingsStore → UserDefaults。登録辞書は変換要求に添付。ローカル候補辞書の索引とは別 |
-| 自動変換の同意・閾値・回数上限・累積HTTP回数 | DecisionsCoordinator、AmbientConversionLifecycle | DecisionsSettingsStore → UserDefaults。上限は請求額ではない |
-| APIキー | APIKeyStoreから通信設定へ読み出す。画面は短い伏せ字 | Keychainのみ（端末限定・同期無効）。HTTP認証ヘッダーで送信し、本文・ログへ混ぜない |
+| 接続先・モデル・送信先ごとの同意・登録ユーザー辞書・変換API利用統計 | 設定UI、ConversionCoordinator | SettingsStore → UserDefaults（接続先別設定・`provider + model`別トークン統計と記録時概算費用）。原文・候補・キーは含めない。登録辞書は変換要求に添付 |
+| 自動変換の同意・閾値・回数上限・累積HTTP回数 | DecisionsCoordinator、AmbientConversionLifecycle | DecisionsSettingsStore → UserDefaults。上限は請求額ではない（変換APIの利用統計とは別管理） |
+| APIキー | APIKeyStoreから送信先エンドポイント別に通信設定へ読み出す。画面は短い伏せ字 | Keychainのみ（`account = "endpoint:<url>"`、端末限定・同期無効）。旧`default`キーは元の所有エンドポイントにのみ移行。HTTP認証ヘッダーで送信し、別接続先・本文・ログへ混ぜない |
 | 判定対象の入力状態 | 自動変換の固定窓と未送信バッチ | DecisionsへID付き入力状態とpredicate質問を送る。変換APIとは別通信・別課金。判定にはユーザー辞書を添付しない |
 | LLM要求 | 原文、追加候補時の現在結果、登録ユーザー辞書 | ConversionCoordinatorが文字数・接続先・キー・送信同意を確認後に送信。周辺文脈・文体は未実装 |
 | 中黒・Mozc・Sudachi索引 | 追加候補成功時だけローカル補完 | バンドル資産を読む。索引全体をAPIへ送らず、追加通信もしない。API失敗のオフライン代替ではない |
@@ -275,9 +275,9 @@ Undoは入力先の標準編集履歴へ委ねる。原文の確定と範囲指�
 
 ## 7. 設定・メニューバー（実装済みと未実装）
 
-[SettingsWindowController](../Sources/SumibiIME/Settings/SettingsWindowController.swift)が一つのNSWindowとNSHostingViewを保持する。mainの画面はAPI設定、送信先・料金・同意、ユーザー辞書・Decisions設定への入口、保存・APIキー削除。mainはPR #61でMozcライセンス閲覧も追加済み。#62作業版はトップの「診断・デバッグ…」を追加する。一時本文表示は明示オン・メモリ内限定・再起動後オフで、ログへ流さない。文脈・文体・変換テスト・一般的な利用状況の集計は未実装である。
+[SettingsWindowController](../Sources/SumibiIME/Settings/SettingsWindowController.swift)が一つのNSWindowとNSHostingViewを保持する。画面はAPI設定（`OpenAI`／`Google`／`その他`の接続先切替、OpenAI代表モデル／自由入力、Googleの`Gemini 3.6 Flash`／`Gemini 3.5 Flash-Lite`の2モデル選択、カスタムURL／モデル入力）、送信先・料金・同意、Decisions設定への入口（Google／その他選択時は利用不可理由を表示）、ユーザー辞書への入口、`provider + model`別の利用状況（変換回数・入力／キャッシュ入力／出力／内訳不明／合計トークン・概算USD費用・リセット）、Mozcライセンス閲覧、「診断・デバッグ…」、保存・APIキー削除。一時本文表示は明示オン・メモリ内限定・再起動後オフで、ログへ流さない。文脈・文体・変換テストは未実装である。
 
-送信先・モデル・辞書は[SettingsStore](../Sources/SumibiIME/Settings/SettingsStore.swift)のUserDefaults、APIキーは[APIKeyStore](../Sources/SumibiIME/Settings/APIKeyStore.swift)のKeychainへ保存する。キーは固定長の伏せ字と末尾4文字で表示し、「変更」から空の編集欄を開く。保存するまで既存キーは保持する。API入力欄は変換対象外で、辞書編集シート中だけ自アプリでの変換を許可する。
+接続先ごとの設定・モデル・辞書・利用統計は[SettingsStore](../Sources/SumibiIME/Settings/SettingsStore.swift)のUserDefaults、APIキーは[APIKeyStore](../Sources/SumibiIME/Settings/APIKeyStore.swift)のKeychain（送信先エンドポイント別アカウント`endpoint:<url>`）へ保存する。キーは固定長の伏せ字と末尾4文字で表示し、「変更」から空の編集欄を開く。保存するまで既存キーは保持する。API入力欄は変換対象外で、辞書編集シート中だけ自アプリでの変換を許可する。
 
 [MenuBarController](../Sources/SumibiIME/MenuBar/MenuBarController.swift)のNSStatusItemは同じプロセスが動いている間、Sumibiが入力ソースでなくても表示する。SMAppService.mainAppでアプリ自身をログイン項目へ登録し、利用者の解除は`MenuBarLoginItemOptOut`で記憶する。独立ヘルパーではない。
 

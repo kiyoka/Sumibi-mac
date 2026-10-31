@@ -32,8 +32,12 @@ public struct SupplementalCandidateDictionary: Sendable {
             added.insert(value)
             if added.count == maximumAdded { break }
         }
-        return ConversionResult(candidates: candidates, model: result.model,
-            dictionaryCandidates: result.dictionaryCandidates.union(added))
+        return ConversionResult(
+            candidates: candidates,
+            model: result.model,
+            dictionaryCandidates: result.dictionaryCandidates.union(added),
+            usage: result.usage
+        )
     }
 
     /// ASCII case only. No trimming, substring search, or compatibility normalization:

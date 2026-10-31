@@ -78,10 +78,8 @@ Windows側はこの差を明示的に設計・テストし、遅延キーや疑�
 ## 5. 変換APIと上限（Mac実装の契約）
 
 通常変換は[OpenAICompatibleClient](../Sources/SumibiCore/OpenAICompatibleClient.swift)の
-Chat Completions互換形式。設定済みURLが完全な`chat/completions`でなければ`v1/chat/completions`を補完する。
-要求はBearer認証、`model`とsystem/userの`messages`。既定接続先は`https://api.openai.com`、
-既定モデルはコード上`gpt-6-sol`。代表モデルには[ModelPreset](../Sources/SumibiCore/ModelPreset.swift)の
-指定を付けるが、自由入力モデルへ同じオプションを無条件に送らない。
+Chat Completions互換形式。設定済みURLが完全な`chat/completions`でなければ、Google公式ホストでは`v1beta/openai/chat/completions`、それ以外では`v1/chat/completions`を補完する。
+要求はBearer認証、`model`とsystem/userの`messages`。接続先は`OpenAI`（`https://api.openai.com`、既定モデル`gpt-6-sol`）、`Google`（`https://generativelanguage.googleapis.com/v1beta/openai`、既定モデル`gemini-3.6-flash`、軽量モデル`gemini-3.5-flash-lite`）、`その他`（自由入力）。[ModelPreset](../Sources/SumibiCore/ModelPreset.swift)および`GeminiModelOption`の推論パラメーターはそれぞれの公式ホスト接続時だけ付与し、自由入力モデルやカスタムURLへ無条件に送らない。
 これはMacが現在使う値の記録であり、すべての互換サーバーへの対応保証やモデル移行の指定ではない。
 
 - 初回1候補、追加最大12候補。応答本文のJSONオブジェクト／配列、部分的なJSON、最後に通常文字列を解析し、

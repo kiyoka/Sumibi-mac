@@ -12,11 +12,28 @@ Decisions移行・原文読取待機対策の作業版はCore 93件とIME側217�
 
 | 対象 | 件数 | 検証すること |
 | --- | --- | --- |
-| SettingsStore | 9 | 保存・再読込、破損データ、正規化、旧モデルの一度だけの移行、送信先ごとの同意、旧設定の移行と上書き防止 |
-| APIKeyStore | 8 | 読込・更新・追加・削除、失敗の伝播、保存先の固定、端末限定・iCloud同期無効の属性 |
+| SettingsStore | 13 | 保存・再読込、破損データ、正規化、旧モデルの一度だけの移行、送信先ごとの同意、旧設定の移行と上書き防止、接続先別設定保持、変換API利用量・概算費用の集計・価格改定耐性・リセット |
+| APIKeyStore | 10 | 読込・更新・追加・削除、失敗の伝播、保存先の固定、端末限定・iCloud同期無効の属性、エンドポイント別アカウント分離、旧単一キーの元エンドポイント限定移行 |
 | InputEffectApplierとRuntime | 9 | 原文の確定、UTF-16範囲、古いカーソル位置、選択変換、誤置換の拒否、Escと入力先切替、待機制御キーの非実行 |
-| ConversionCoordinator | 4 | APIキー欠落・Keychain失敗・送信同意なしでクライアントを作らない、同意後の設定反映、文字数超過時の通信防止 |
-| APISettingsModel | 6 | 保存済みキーの短い表示、変更開始・キャンセル、保存成功・失敗後の編集状態、伏せ字をキーとして保存しないこと |
+| ConversionCoordinator | 8 | APIキー欠落・Keychain失敗・送信同意なしでクライアントを作らない、同意後の設定反映、文字数超過時の通信防止、Google接続先でのキー分離・利用統計記録・ローカル候補補完維持 |
+| APISettingsModel | 8 | 保存済みキーの短い表示、変更開始・キャンセル、保存成功・失敗後の編集状態、伏せ字をキーとして保存しないこと、OpenAI／Google切替時の設定・キー保持、カスタムURL変更時のキー非流用 |
+
+## Gemini対応・接続先別設定保持・利用量／概算費用表示（#69）
+
+2026-10-31、#69ブランチで通常構成・開発構成ともにCore 111件・IME 239件、計350件を実行し、
+349件成功、実60秒タイムアウト1件は明示スキップ。
+`ProviderConfigurationTests`・`ModelPresetTests`・`ConversionTests`・`SettingsStoreTests`・`APIKeyStoreTests`・
+`APISettingsModelTests`・`ConversionCoordinatorTests`・`DecisionsCoordinatorTests`・`DecisionsSettingsModelTests`に
+計20件を追加し、以下を模擬通信・模擬Keychain・専用UserDefaultsで確認する（実API送信・実Keychain変更は行わない）。
+
+- `OpenAI`／`Google`／`その他`の判定・正規化・既定エンドポイント解決、旧JSONからのデコード互換性
+- Google用モデル（`gemini-3.6-flash`／`gemini-3.5-flash-lite`）の選択、Gemini専用オプション（`reasoning_effort: "minimal"`、`temperature`）、`/v1beta/openai/chat/completions`のURL補完、カスタムURLへの固有パラメーター非混入
+- Keychainのエンドポイント別アカウント（`endpoint:<url>`）分離、旧`default`アカウントから元の所有エンドポイントへの限定移行
+- OpenAI／Google／その他の切替時のURL・モデル・APIキーマスク表示の保持、URL変更時の再同意とキー非流用
+- `usage`デコード、`provider + model`単位の利用量・概算費用集計、キャッシュ入力控除、内訳不明トークン時の`nil`（`不明`）判定、`gemini-3.6-flash`の導入価格期間（2026-12-31 UTCまで）と標準価格期間（2027-01-01 UTC以降）の計算と`recordedCostUSD`保持
+- Google／その他選択時のDecisions自動変換の拒否、GoogleキーのDecisionsへの非送信、接続先切替時の自動変換認可失効
+
+同日、利用者のABCへの切り替え確認後に旧アプリを退避し、開発署名した#69の通常版へ入れ替え・再起動した（導入後の構成・署名検査に成功）。利用者がDecisions自動変換をオフにし、Google Gemini APIで変換できることを実機確認した。確認アプリ名や追加候補・1回のUndo・OpenAIとの往復切替の個別結果は未報告であり、全アプリ・全経路の確認済みとは扱わない。
 
 ### 分離の約束
 

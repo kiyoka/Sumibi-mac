@@ -480,6 +480,10 @@ final class SumibiInputController: IMKInputController {
     private func observeAmbient(latestKey: String) {
         let settings = DecisionsSettingsStore().load()
         guard settings.permitsSending else { runtime.ambient.stop(); return }
+        let provider = SettingsStore().loadProviderConfiguration()
+        guard provider.provider == .openAI, DecisionsCoordinator.isOfficialOpenAI(provider.endpoint) else {
+            runtime.ambient.stop(); return
+        }
         guard !IsSecureEventInputEnabled() else { runtime.ambient.skipObservation(.secureInput); return }
         guard state.pending == nil, !runtime.candidates.shouldBeVisible else {
             runtime.ambient.skipObservation(.busy); return

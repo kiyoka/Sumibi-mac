@@ -103,6 +103,58 @@ final class ConversionCoordinatorTests: XCTestCase {
         XCTAssertEqual(result, .success(ConversionResult(candidates: ["星"])))
     }
 
+    func testGoogleConversionUsesGoogleKeyAndRecordsUsageWhilePreservingSupplementalCandidates() async throws {
+        let settings = settings()
+        let googleConfig = ProviderConfiguration(
+            provider: .google,
+            endpoint: AIProvider.google.defaultEndpoint,
+            model: GeminiModelOption.quality.rawValue
+        )
+        try settings.saveProviderConfiguration(googleConfig)
+        settings.saveConsent(for: googleConfig.endpoint)
+
+        let keys = RecordingKeychain(storage: [
+            "endpoint:https://api.openai.com": Data("sk-openai-should-not-be-used".utf8),
+            "endpoint:https://generativelanguage.googleapis.com/v1beta/openai": Data("AIza-google-key".utf8),
+        ])
+        let usage = TokenUsage(inputTokens: 150, cachedInputTokens: 50, outputTokens: 20)
+        var receivedConfig: OpenAICompatibleConfiguration?
+        let coordinator = ConversionCoordinator(
+            settings: settings,
+            keys: APIKeyStore(keychain: keys),
+            responseMode: { "api" },
+            dictionary: SupplementalCandidateDictionary(symbolTSV: "hoshi\t☆\t★")
+        ) { config in
+            receivedConfig = config
+            return UsageReturningService(usage: usage)
+        }
+
+        let result = await coordinator.convert(
+            ConversionRequest(source: "hoshi", mode: .alternatives, currentConversion: "星")
+        )
+        XCTAssertEqual(
+            result,
+            .success(ConversionResult(
+                candidates: ["星", "☆", "★"],
+                model: "gemini-3.6-flash",
+                dictionaryCandidates: ["☆", "★"],
+                usage: usage
+            ))
+        )
+        XCTAssertEqual(receivedConfig?.endpoint.absoluteString, AIProvider.google.defaultEndpoint)
+        XCTAssertEqual(receivedConfig?.model, "gemini-3.6-flash")
+        XCTAssertEqual(receivedConfig?.apiKey, "AIza-google-key")
+
+        let stats = settings.loadUsageStatistics()
+        XCTAssertEqual(stats.count, 1)
+        XCTAssertEqual(stats.first?.provider, .google)
+        XCTAssertEqual(stats.first?.model, "gemini-3.6-flash")
+        XCTAssertEqual(stats.first?.conversionCount, 1)
+        XCTAssertEqual(stats.first?.inputTokens, 150)
+        XCTAssertEqual(stats.first?.cachedInputTokens, 50)
+        XCTAssertEqual(stats.first?.outputTokens, 20)
+    }
+
     private func settings() -> SettingsStore {
         let domain = "org.sumibi.tests.coordinator.\(UUID().uuidString)"
         domains.append(domain)
@@ -127,5 +179,12 @@ private actor SymbolRecordingService: ConversionService {
         requests.append(request)
         if fails { throw ConversionError.offline }
         return ConversionResult(candidates: ["星"])
+    }
+}
+
+private struct UsageReturningService: ConversionService {
+    let usage: TokenUsage
+    func convert(_ request: ConversionRequest) async throws -> ConversionResult {
+        ConversionResult(candidates: ["星"], model: "gemini-3.6-flash", usage: usage)
     }
 }

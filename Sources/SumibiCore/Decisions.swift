@@ -60,7 +60,7 @@ public enum DecisionsError: Error, Equatable, Sendable {
         case .offline: "Decisions判定に必要なネットワークへ接続できません。"
         case .network: "Decisions判定の通信に失敗しました。"
         case .requestLimit: "Decisions判定回数の上限に達しました。費用を確認してリセットしてください。"
-        case .unsupportedProvider: "自動判定には公式OpenAI接続先が必要です。APIのURLをhttps://api.openai.comに設定してください。"
+        case .unsupportedProvider: "自動判定には公式OpenAI接続先が必要です。Googleやその他の接続先では利用できません。接続先をOpenAI（https://api.openai.com）に設定してください。"
         case .refused: "OpenAIがこの入力の自動判定を拒否しました。入力は変更していません。手動変換を試してください。"
         }
     }
@@ -106,6 +106,11 @@ public enum AmbientText {
             }
             return text
         }.filter { !$0.isEmpty }
-        return ConversionResult(candidates: candidates, model: result.model)
+        return ConversionResult(
+            candidates: candidates,
+            model: result.model,
+            dictionaryCandidates: result.dictionaryCandidates,
+            usage: result.usage
+        )
     }
 }

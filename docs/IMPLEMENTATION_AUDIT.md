@@ -30,8 +30,9 @@
 | 読取待機 | 自動変換の確定原文を最大0.5秒読取確認、置換後の結果も読取だけ再確認 | API再送・全文探索・再書込ではない。恒久的な読取制約は解消しない |
 | 状態・エラー | メニューバーの処理印、固定原因・対処・明示解除。カーソル付近の短時間チェック／赤い! | [表示](CONVERSION_FEEDBACK.md)。直近のスコアは現在入力の成功保証ではない |
 | 一時デバッグ | 明示オン時の原文・確定前後の取得文字列をメモリ内表示。再起動後オフ | 本ブランチは観測時の比較を追加し、設定トップへ移動。[#62の仕様](DIAGNOSTICS_SETTINGS.md) |
-| 保存・同意 | 接続先・モデル・辞書はUserDefaults、キーはKeychain。変換同意は接続先文字列ごと | [SettingsStore](../Sources/SumibiIME/Settings/SettingsStore.swift)、[APIKeyStore](../Sources/SumibiIME/Settings/APIKeyStore.swift) |
-| 周辺文脈等 | 周辺文脈・文体指示・設定画面の変換テスト・一般的なトークン／料金集計は未実装 | Decisionsの回数制限は、請求額や変換API全体の利用額表示とは別 |
+| 保存・同意 | 接続先・モデル・辞書はUserDefaults、キーはKeychain。変換同意は接続先文字列ごと | #69ブランチで接続先（`OpenAI`／`Google`／`その他`）ごとの設定保持とKeychainの`endpoint:<url>`アカウント分離を追加。[SettingsStore](../Sources/SumibiIME/Settings/SettingsStore.swift)、[APIKeyStore](../Sources/SumibiIME/Settings/APIKeyStore.swift) |
+| 利用状況・概算費用 | mainでは未実装（Decisionsの通信回数のみ） | #69ブランチで`provider + model`別の変換回数・トークン数・記録時概算USD費用表示とリセットを追加。[UsageStatistics](../Sources/SumibiCore/UsageStatistics.swift) |
+| 周辺文脈等 | 周辺文脈・文体指示・設定画面の変換テストは未実装 | Decisionsの回数制限は、変換APIの利用統計・概算費用表示とは別管理 |
 | 配布 | 単一アプリ、ユーザー本人のみ。Developer ID署名・公証用スクリプトはPR #59でmain統合済み | 検証用pkgの実署名・公証は成功。新規導入・更新・削除のpkg実機検証は未完了 |
 
 ## 要件との差・未解決事項
@@ -64,6 +65,9 @@
 - #62版は更新済み。2026-10-20、利用者は設定トップから開けること、Decisions設定に重複しないこと、
   オンにして閉じ再度開いてもオンであることの3点を確認。再発時の比較表示とオフでの表示消去は確認待ち。
   全OS・全アプリの合格としない。
+- #69ブランチ（2026-10-31）：通常・開発構成それぞれCore 111件＋IME 239件＝350件（349件成功、実60秒タイムアウト1件は明示スキップ）。
+  通常版を実機へ更新後、利用者がDecisions自動変換をオフにした状態でGoogle Gemini APIによる変換が動作することを確認した。
+  確認アプリ名や追加候補・Undo等の個別項目は未報告であり、全環境の確認済みとはしない。
 - #15の実署名・公証は0.4／build 4／arm64の検証用pkg。0.9.0の配布物やWindows用成果物ではない。
 
 ## 保守
