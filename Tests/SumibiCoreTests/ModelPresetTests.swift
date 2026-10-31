@@ -47,8 +47,56 @@ final class ModelPresetTests: XCTestCase {
         XCTAssertNil(json["verbosity"])
     }
 
-    private func body(model: String) throws -> [String: Any] {
-        let data = try OpenAICompatibleClient.requestBody(for: ConversionRequest(source: "ohayou"), model: model)
+    func testGeminiModelOptionsAndDefaultGoogleModel() {
+        XCTAssertEqual(ProviderConfiguration.defaultGoogleModel, "gemini-3.6-flash")
+        XCTAssertEqual(GeminiModelOption.allCases.map(\.rawValue), ["gemini-3.6-flash", "gemini-3.5-flash-lite"])
+        XCTAssertEqual(GeminiModelOption.quality.reasoningEffort, "minimal")
+        XCTAssertEqual(GeminiModelOption.quality.temperature, 1)
+        XCTAssertEqual(GeminiModelOption.economy.reasoningEffort, "minimal")
+        XCTAssertNil(GeminiModelOption.economy.temperature)
+    }
+
+    func testGoogleProviderIsNotChangedByLegacyDefaultModelMigration() {
+        let google = ProviderConfiguration(
+            provider: .google,
+            endpoint: AIProvider.google.defaultEndpoint,
+            model: GeminiModelOption.economy.rawValue
+        )
+        XCTAssertEqual(google.migratingLegacyDefaultModel(alreadyMigrated: false), google)
+    }
+
+    func testGeminiRequestBodyIncludesGeminiOptionsWithoutOpenAIVerbosity() throws {
+        let googleEndpoint = URL(string: AIProvider.google.defaultEndpoint)!
+        let quality = try body(model: "gemini-3.6-flash", endpoint: googleEndpoint)
+        XCTAssertEqual(quality["model"] as? String, "gemini-3.6-flash")
+        XCTAssertEqual(quality["reasoning_effort"] as? String, "minimal")
+        XCTAssertEqual(quality["temperature"] as? Double, 1)
+        XCTAssertNil(quality["verbosity"])
+
+        let economy = try body(model: "gemini-3.5-flash-lite", endpoint: googleEndpoint)
+        XCTAssertEqual(economy["model"] as? String, "gemini-3.5-flash-lite")
+        XCTAssertEqual(economy["reasoning_effort"] as? String, "minimal")
+        XCTAssertNil(economy["temperature"])
+        XCTAssertNil(economy["verbosity"])
+    }
+
+    func testCustomEndpointDoesNotInjectOpenAIOrGeminiSpecificParameters() throws {
+        let customEndpoint = URL(string: "https://custom.example.com/v1")!
+        for model in ["gpt-6-sol", "gpt-6-luna", "gemini-3.6-flash", "gemini-3.5-flash-lite"] {
+            let json = try body(model: model, endpoint: customEndpoint)
+            XCTAssertEqual(json["model"] as? String, model)
+            XCTAssertNil(json["reasoning_effort"])
+            XCTAssertNil(json["verbosity"])
+            XCTAssertNil(json["temperature"])
+        }
+    }
+
+    private func body(model: String, endpoint: URL = URL(string: ProviderConfiguration.defaultEndpoint)!) throws -> [String: Any] {
+        let data = try OpenAICompatibleClient.requestBody(
+            for: ConversionRequest(source: "ohayou"),
+            model: model,
+            endpoint: endpoint
+        )
         return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 }

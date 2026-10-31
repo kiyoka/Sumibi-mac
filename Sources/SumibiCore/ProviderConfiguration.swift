@@ -1,5 +1,44 @@
 import Foundation
 
+/// 設定画面で選べるAI接続先。
+///
+/// 選択肢と既定エンドポイントはSumibi-iOS PR #137に合わせる(Sumibi-iOS#135)。コードは共有しない。
+public enum AIProvider: String, CaseIterable, Codable, Identifiable, Sendable {
+    case openAI, google, other
+
+    public var id: Self { self }
+
+    public var displayName: String {
+        switch self {
+        case .openAI: "OpenAI"
+        case .google: "Google"
+        case .other: "その他"
+        }
+    }
+
+    public var defaultEndpoint: String {
+        switch self {
+        case .openAI: ProviderConfiguration.defaultEndpoint
+        case .google: "https://generativelanguage.googleapis.com/v1beta/openai"
+        case .other: ""
+        }
+    }
+
+    /// 保存済みの旧設定に`provider`がない場合、URLのホストから接続先を判定する。
+    public static func inferred(from endpoint: String) -> AIProvider {
+        let trimmed = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return .openAI }
+        guard let host = URL(string: trimmed)?.host()?.lowercased(), !host.isEmpty else {
+            return .other
+        }
+        switch host {
+        case "api.openai.com": return .openAI
+        case "generativelanguage.googleapis.com": return .google
+        default: return .other
+        }
+    }
+}
+
 /// BYOK(利用者のAPIキーを使うOpenAI互換API)の送信先設定。
 ///
 /// 項目名と既定値はSumibi-iOSの`ProviderConfiguration`に合わせる。コードは共有しない。
@@ -7,22 +46,57 @@ import Foundation
 public struct ProviderConfiguration: Codable, Equatable, Sendable {
     public static let defaultEndpoint = "https://api.openai.com"
     public static let defaultModel = ModelPreset.gpt6Sol.model
+    public static let defaultGoogleModel = GeminiModelOption.quality.rawValue
 
     public var endpoint: String
     public var model: String
+    public var provider: AIProvider
 
-    public init(endpoint: String = Self.defaultEndpoint, model: String = Self.defaultModel) {
+    public init(
+        endpoint: String = Self.defaultEndpoint,
+        model: String = Self.defaultModel,
+        provider: AIProvider? = nil
+    ) {
+        self.endpoint = endpoint
+        self.model = model
+        self.provider = provider ?? AIProvider.inferred(from: endpoint)
+    }
+
+    public init(
+        provider: AIProvider,
+        endpoint: String,
+        model: String
+    ) {
+        self.provider = provider
         self.endpoint = endpoint
         self.model = model
     }
 
-    /// 前後の空白を取り除き、空になった項目は既定値へ戻したもの。
+    private enum CodingKeys: String, CodingKey { case endpoint, model, provider }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        endpoint = try values.decode(String.self, forKey: .endpoint)
+        model = try values.decode(String.self, forKey: .model)
+        provider = try values.decodeIfPresent(AIProvider.self, forKey: .provider)
+            ?? AIProvider.inferred(from: endpoint)
+    }
+
+    /// 前後の空白を取り除き、空になった項目は接続先の既定値へ戻したもの。
     public var normalized: ProviderConfiguration {
         let trimmedEndpoint = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallbackEndpoint = provider.defaultEndpoint
+        let fallbackModel: String
+        switch provider {
+        case .openAI: fallbackModel = Self.defaultModel
+        case .google: fallbackModel = Self.defaultGoogleModel
+        case .other: fallbackModel = trimmedModel.isEmpty ? Self.defaultModel : trimmedModel
+        }
         return ProviderConfiguration(
-            endpoint: trimmedEndpoint.isEmpty ? Self.defaultEndpoint : trimmedEndpoint,
-            model: trimmedModel.isEmpty ? Self.defaultModel : trimmedModel
+            endpoint: trimmedEndpoint.isEmpty ? fallbackEndpoint : trimmedEndpoint,
+            model: trimmedModel.isEmpty ? fallbackModel : trimmedModel,
+            provider: provider
         )
     }
 }

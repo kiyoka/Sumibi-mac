@@ -37,16 +37,46 @@ public struct ConversionRequest: Equatable, Sendable {
     }
 }
 
+public struct TokenUsage: Codable, Equatable, Sendable {
+    public let inputTokens: Int
+    public let cachedInputTokens: Int
+    public let outputTokens: Int
+    public let unitemizedTokens: Int
+
+    public init(
+        inputTokens: Int,
+        cachedInputTokens: Int = 0,
+        outputTokens: Int,
+        unitemizedTokens: Int = 0
+    ) {
+        self.inputTokens = max(0, inputTokens)
+        self.cachedInputTokens = min(max(0, cachedInputTokens), max(0, inputTokens))
+        self.outputTokens = max(0, outputTokens)
+        self.unitemizedTokens = max(0, unitemizedTokens)
+    }
+
+    public var totalTokens: Int {
+        inputTokens + outputTokens + unitemizedTokens
+    }
+}
+
 public struct ConversionResult: Equatable, Sendable {
     public let candidates: [String]
     public let model: String?
     /// ローカル辞書から追加された候補。LLM候補と重複する表記は含めない。
     public let dictionaryCandidates: Set<String>
+    public let usage: TokenUsage?
 
-    public init(candidates: [String], model: String? = nil, dictionaryCandidates: Set<String> = []) {
+    public init(
+        candidates: [String],
+        model: String? = nil,
+        dictionaryCandidates: Set<String> = [],
+        usage: TokenUsage? = nil
+    ) {
         self.candidates = candidates
         self.model = model
         self.dictionaryCandidates = dictionaryCandidates
+        self.usage = usage
     }
 }
 

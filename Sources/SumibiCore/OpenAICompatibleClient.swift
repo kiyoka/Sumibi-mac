@@ -23,12 +23,13 @@ public struct OpenAICompatibleClient: ConversionService {
     private struct ChatRequest: Encodable {
         let model: String
         let messages: [Message]
-        /// 代表モデルにだけ付ける。自由入力のモデルには送らない(nilは要求に含めない)。
+        /// 代表モデルまたはGeminiモデルにだけ付ける。自由入力や未知の接続先には送らない(nilは要求に含めない)。
         let reasoningEffort: String?
         let verbosity: String?
+        let temperature: Double?
 
         enum CodingKeys: String, CodingKey {
-            case model, messages, verbosity
+            case model, messages, verbosity, temperature
             case reasoningEffort = "reasoning_effort"
         }
     }
@@ -41,10 +42,33 @@ public struct OpenAICompatibleClient: ConversionService {
     private struct ChatResponse: Decodable {
         let choices: [Choice]
         let model: String?
+        let usage: Usage?
     }
 
     private struct Choice: Decodable {
         let message: Message
+    }
+
+    private struct Usage: Decodable {
+        let promptTokens: Int
+        let completionTokens: Int
+        let totalTokens: Int?
+        let promptTokensDetails: PromptTokensDetails?
+
+        enum CodingKeys: String, CodingKey {
+            case promptTokens = "prompt_tokens"
+            case completionTokens = "completion_tokens"
+            case totalTokens = "total_tokens"
+            case promptTokensDetails = "prompt_tokens_details"
+        }
+    }
+
+    private struct PromptTokensDetails: Decodable {
+        let cachedTokens: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case cachedTokens = "cached_tokens"
+        }
     }
 
     private let configuration: OpenAICompatibleConfiguration
@@ -67,7 +91,11 @@ public struct OpenAICompatibleClient: ConversionService {
         urlRequest.timeoutInterval = configuration.timeout
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.setValue("Bearer \(configuration.apiKey)", forHTTPHeaderField: "Authorization")
-        urlRequest.httpBody = try Self.requestBody(for: request, model: configuration.model)
+        urlRequest.httpBody = try Self.requestBody(
+            for: request,
+            model: configuration.model,
+            endpoint: configuration.endpoint
+        )
 
         let data: Data
         let response: URLResponse
@@ -93,12 +121,52 @@ public struct OpenAICompatibleClient: ConversionService {
             limit: request.mode.candidateCount
         )
         guard !candidates.isEmpty else { throw ConversionError.emptyResponse }
-        return ConversionResult(candidates: candidates, model: chat.model ?? configuration.model)
+        let usage = chat.usage.flatMap(Self.decodeUsage)
+        return ConversionResult(
+            candidates: candidates,
+            model: chat.model ?? configuration.model,
+            usage: usage
+        )
     }
 
-    /// 要求の本文。代表モデルなら、モデルごとの設定(`reasoning_effort`、`verbosity`)を付ける。
-    static func requestBody(for request: ConversionRequest, model: String) throws -> Data {
-        let preset = ModelPreset(model: model)
+    private static func decodeUsage(_ usage: Usage) -> TokenUsage? {
+        guard usage.promptTokens >= 0, usage.completionTokens >= 0 else { return nil }
+        if let total = usage.totalTokens, total < 0 { return nil }
+        let rawCached = usage.promptTokensDetails?.cachedTokens ?? 0
+        guard rawCached >= 0, rawCached <= usage.promptTokens else {
+            let unitemized = max(
+                1,
+                (usage.totalTokens ?? (usage.promptTokens + usage.completionTokens))
+                    - usage.promptTokens - usage.completionTokens
+            )
+            return TokenUsage(
+                inputTokens: usage.promptTokens,
+                cachedInputTokens: 0,
+                outputTokens: usage.completionTokens,
+                unitemizedTokens: unitemized
+            )
+        }
+        let unitemized = max(
+            0,
+            (usage.totalTokens ?? (usage.promptTokens + usage.completionTokens))
+                - usage.promptTokens - usage.completionTokens
+        )
+        return TokenUsage(
+            inputTokens: usage.promptTokens,
+            cachedInputTokens: rawCached,
+            outputTokens: usage.completionTokens,
+            unitemizedTokens: unitemized
+        )
+    }
+
+    /// 要求の本文。接続先とモデルに応じて推論設定(`reasoning_effort`、`verbosity`、`temperature`)を付ける。
+    /// OpenAI専用の設定値をGoogleや任意の互換サーバーへ無条件に流用しない。
+    static func requestBody(
+        for request: ConversionRequest,
+        model: String,
+        endpoint: URL = URL(string: ProviderConfiguration.defaultEndpoint)!
+    ) throws -> Data {
+        let options = requestOptions(for: model, endpoint: endpoint)
         return try JSONEncoder().encode(
             ChatRequest(
                 model: model,
@@ -106,10 +174,31 @@ public struct OpenAICompatibleClient: ConversionService {
                     Message(role: "system", content: PromptBuilder.systemMessage(for: request)),
                     Message(role: "user", content: PromptBuilder.userMessage(for: request)),
                 ],
-                reasoningEffort: preset?.reasoningEffort,
-                verbosity: preset?.verbosity
+                reasoningEffort: options.reasoningEffort,
+                verbosity: options.verbosity,
+                temperature: options.temperature
             )
         )
+    }
+
+    private static func requestOptions(
+        for model: String,
+        endpoint: URL
+    ) -> (reasoningEffort: String?, verbosity: String?, temperature: Double?) {
+        switch endpoint.host()?.lowercased() {
+        case "generativelanguage.googleapis.com":
+            guard let gemini = GeminiModelOption(model: model) else {
+                return (nil, nil, nil)
+            }
+            return (gemini.reasoningEffort, nil, gemini.temperature)
+        case "api.openai.com":
+            guard let preset = ModelPreset(model: model) else {
+                return (nil, nil, nil)
+            }
+            return (preset.reasoningEffort, preset.verbosity, nil)
+        default:
+            return (nil, nil, nil)
+        }
     }
 
     /// 利用者が入力したURLから、chat completionsの完全なURLを作る。
@@ -117,8 +206,15 @@ public struct OpenAICompatibleClient: ConversionService {
         guard let host = baseURL.host(), !host.isEmpty else { return nil }
         let path = baseURL.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         if path.hasSuffix("chat/completions") { return baseURL }
-        if path.hasSuffix("v1") {
+        if path.hasSuffix("v1beta/openai") || path.hasSuffix("v1") {
             return baseURL.appendingPathComponent("chat").appendingPathComponent("completions")
+        }
+        if host.lowercased() == "generativelanguage.googleapis.com" {
+            let prefix = path == "v1beta" ? baseURL : baseURL.appendingPathComponent("v1beta")
+            return prefix
+                .appendingPathComponent("openai")
+                .appendingPathComponent("chat")
+                .appendingPathComponent("completions")
         }
         return baseURL
             .appendingPathComponent("v1")

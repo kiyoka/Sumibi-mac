@@ -30,13 +30,17 @@ struct DecisionsCoordinator {
     func prepare(observation: DecisionsObservation, settings: DecisionsSettings) throws -> AmbientWork {
         guard settings.permitsSending, store.load() == settings else { throw DecisionsError.invalidSettings }
         let provider = manualSettings.loadProviderConfiguration()
-        guard Self.isOfficialOpenAI(provider.endpoint) else { throw DecisionsError.unsupportedProvider }
+        guard provider.provider == .openAI, Self.isOfficialOpenAI(provider.endpoint) else {
+            throw DecisionsError.unsupportedProvider
+        }
         guard manualSettings.hasConsent(for: provider.endpoint) else { throw ConversionError.consentMissing }
         let dictionary = manualSettings.loadUserDictionary()
         let request = AmbientText.request(source: observation.text, dictionary: dictionary)
         try ConversionLimit.check(request)
         _ = try conversion.service()
-        guard let key = try? keys.load(), !key.isEmpty else { throw DecisionsError.missingKey }
+        guard let key = try? keys.load(for: provider.endpoint, settings: manualSettings), !key.isEmpty else {
+            throw DecisionsError.missingKey
+        }
         let decisions = makeDecisions(key, settings)
         let revision = store.revision
         return AmbientWork(

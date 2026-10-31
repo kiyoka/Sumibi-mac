@@ -53,6 +53,31 @@ final class DecisionsSettingsModelTests: XCTestCase {
         }
     }
 
+    func testGoogleProviderFailsBeforeReadingGoogleKeyAndShowsReason() throws {
+        try isolated { model, store, fake, manual in
+            let google = ProviderConfiguration(
+                provider: .google,
+                endpoint: AIProvider.google.defaultEndpoint,
+                model: GeminiModelOption.quality.rawValue
+            )
+            try manual.saveProviderConfiguration(google)
+            manual.saveConsent(for: google.endpoint)
+            model.reload()
+            XCTAssertNil(model.storedKeyDisplay)
+            XCTAssertFalse(model.hasStoredKey)
+            XCTAssertTrue(fake.calls.isEmpty)
+            XCTAssertTrue(model.statusIsError)
+            XCTAssertTrue(model.statusMessage.contains("Google"))
+
+            model.setConsent(true)
+            model.setEnabled(true)
+            XCTAssertTrue(fake.calls.isEmpty)
+            XCTAssertFalse(store.load().enabled)
+            XCTAssertTrue(model.statusIsError)
+            XCTAssertTrue(model.statusMessage.contains("Google"))
+        }
+    }
+
     func testRevokingConsentDisablesAndPreservesKeyCallsAndManualConsent() throws {
         try isolated { model, store, fake, manual in
             model.reload(); model.setConsent(true); model.setEnabled(true)

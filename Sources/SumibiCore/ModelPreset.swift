@@ -46,15 +46,52 @@ public enum ModelPreset: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// Google接続先で選べるGeminiモデルと、モデルごとに要求へ付ける設定。
+///
+/// 選択肢と指定する値はSumibi-iOS PR #137に合わせる(Sumibi-iOS#135)。コードは共有しない。
+public enum GeminiModelOption: String, CaseIterable, Identifiable, Codable, Sendable {
+    case quality = "gemini-3.6-flash"
+    case economy = "gemini-3.5-flash-lite"
+
+    public var id: Self { self }
+
+    /// APIへ送るモデル名。
+    public var model: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .quality: "精度重視：Gemini 3.6 Flash"
+        case .economy: "速度・費用重視：Gemini 3.5 Flash-Lite"
+        }
+    }
+
+    /// GoogleのOpenAI互換エンドポイントでthinkingを最小化する。
+    public var reasoningEffort: String { "minimal" }
+
+    /// Gemini 3.6 Flashは公式推奨のtemperature 1を指定する。
+    public var temperature: Double? {
+        switch self {
+        case .quality: 1
+        case .economy: nil
+        }
+    }
+
+    public init?(model: String) {
+        self.init(rawValue: model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+    }
+}
+
 extension ProviderConfiguration {
     /// 以前の既定モデル。保存済みの設定がこれなら、一度だけ新しい既定へ移す。
     public static let legacyDefaultModel = ModelPreset.gpt56Terra.model
 
     /// 以前の既定モデル(GPT-5.6 Terra)の設定を、新しい既定モデル(GPT-6 Sol)へ移したもの。
     /// 移行は一度だけ行う。移行後に利用者がGPT-5.6 Terraを選び直したら、そのままにする。
+    /// Google接続先の設定は変更しない。
     public func migratingLegacyDefaultModel(alreadyMigrated: Bool) -> ProviderConfiguration {
         guard !alreadyMigrated,
+              provider != .google,
               model.trimmingCharacters(in: .whitespacesAndNewlines) == Self.legacyDefaultModel else { return self }
-        return ProviderConfiguration(endpoint: endpoint, model: Self.defaultModel)
+        return ProviderConfiguration(endpoint: endpoint, model: Self.defaultModel, provider: provider)
     }
 }

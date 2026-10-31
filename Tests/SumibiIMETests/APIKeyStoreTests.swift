@@ -85,6 +85,58 @@ final class APIKeyStoreTests: XCTestCase {
         }
     }
 
+    func testEndpointScopedAccountsIsolateKeysPerDestination() throws {
+        let fake = RecordingKeychain(storage: [:])
+        let store = APIKeyStore(keychain: fake)
+        let openAIEndpoint = "https://api.openai.com"
+        let googleEndpoint = "https://generativelanguage.googleapis.com/v1beta/openai"
+        let customOne = "https://one.example.com/v1"
+        let customTwo = "https://two.example.com/v1"
+
+        try store.save("sk-openai-key", for: openAIEndpoint)
+        try store.save("AIza-google-key", for: googleEndpoint)
+        try store.save("custom-key-1", for: customOne)
+
+        XCTAssertEqual(try store.load(for: openAIEndpoint), "sk-openai-key")
+        XCTAssertEqual(try store.load(for: googleEndpoint), "AIza-google-key")
+        XCTAssertEqual(try store.load(for: customOne), "custom-key-1")
+        XCTAssertNil(try store.load(for: customTwo))
+
+        XCTAssertNotNil(fake.storage?["endpoint:https://api.openai.com"])
+        XCTAssertNotNil(fake.storage?["endpoint:https://generativelanguage.googleapis.com/v1beta/openai"])
+        XCTAssertNotNil(fake.storage?["endpoint:https://one.example.com/v1"])
+
+        try store.delete(for: openAIEndpoint)
+        XCTAssertNil(try store.load(for: openAIEndpoint))
+        XCTAssertEqual(try store.load(for: googleEndpoint), "AIza-google-key")
+        XCTAssertEqual(try store.load(for: customOne), "custom-key-1")
+    }
+
+    func testLegacyDefaultKeyMigratesOnlyToItsOriginalOwnerEndpoint() throws {
+        let fake = RecordingKeychain(storage: ["default": Data("legacy-custom-key".utf8)])
+        let store = APIKeyStore(keychain: fake)
+        let ownerEndpoint = "https://legacy.example.com/v1"
+        let googleEndpoint = "https://generativelanguage.googleapis.com/v1beta/openai"
+
+        // Loading for Google must NOT claim or migrate the legacy key owned by legacy.example.com.
+        XCTAssertNil(try store.load(for: googleEndpoint, legacyOwnerEndpoint: ownerEndpoint))
+        XCTAssertNotNil(fake.storage?["default"])
+        XCTAssertNil(fake.storage?["endpoint:\(googleEndpoint)"])
+
+        // Loading for the original owner endpoint migrates the key and deletes "default".
+        var checked = false
+        XCTAssertEqual(
+            try store.load(for: ownerEndpoint, legacyOwnerEndpoint: ownerEndpoint, onLegacyChecked: { checked = true }),
+            "legacy-custom-key"
+        )
+        XCTAssertTrue(checked)
+        XCTAssertNil(fake.storage?["default"])
+        XCTAssertEqual(
+            fake.storage?["endpoint:\(ownerEndpoint)"],
+            Data("legacy-custom-key".utf8)
+        )
+    }
+
     private func assertBaseQuery(_ query: [String: Any], file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertEqual(query[kSecClass as String] as? String, kSecClassGenericPassword as String, file: file, line: line)
         XCTAssertEqual(query[kSecAttrService as String] as? String, "org.sumibi.Sumibi-mac.api-key", file: file, line: line)
@@ -94,6 +146,7 @@ final class APIKeyStoreTests: XCTestCase {
 }
 
 final class RecordingKeychain: KeychainAccess {
+    var storage: [String: Data]?
     var loadResult: (OSStatus, CFTypeRef?) = (errSecItemNotFound, nil)
     var updateStatus = errSecItemNotFound
     var addStatus = errSecSuccess
@@ -102,16 +155,58 @@ final class RecordingKeychain: KeychainAccess {
     var queries: [[String: Any]] = []
     var attributes: [[String: Any]] = []
     var items: [[String: Any]] = []
+
+    init(storage: [String: Data]? = nil) {
+        self.storage = storage
+    }
+
     func copyMatching(_ query: CFDictionary) -> (OSStatus, CFTypeRef?) {
-        calls.append("load"); queries.append(query as! [String: Any]); return loadResult
+        let dict = query as! [String: Any]
+        calls.append("load"); queries.append(dict)
+        if let storage {
+            guard let account = dict[kSecAttrAccount as String] as? String,
+                  let data = storage[account] else {
+                return (errSecItemNotFound, nil)
+            }
+            return (errSecSuccess, data as CFData)
+        }
+        return loadResult
     }
     func update(_ query: CFDictionary, attributes: CFDictionary) -> OSStatus {
-        calls.append("update"); queries.append(query as! [String: Any]); self.attributes.append(attributes as! [String: Any]); return updateStatus
+        let dict = query as! [String: Any]
+        let attrs = attributes as! [String: Any]
+        calls.append("update"); queries.append(dict); self.attributes.append(attrs)
+        if var storage {
+            guard let account = dict[kSecAttrAccount as String] as? String,
+                  storage[account] != nil,
+                  let data = attrs[kSecValueData as String] as? Data else {
+                return errSecItemNotFound
+            }
+            storage[account] = data
+            self.storage = storage
+            return errSecSuccess
+        }
+        return updateStatus
     }
     func add(_ item: CFDictionary) -> OSStatus {
-        calls.append("add"); items.append(item as! [String: Any]); return addStatus
+        let dict = item as! [String: Any]
+        calls.append("add"); items.append(dict)
+        if var storage {
+            if let account = dict[kSecAttrAccount as String] as? String,
+               let data = dict[kSecValueData as String] as? Data {
+                storage[account] = data
+                self.storage = storage
+            }
+        }
+        return addStatus
     }
     func delete(_ query: CFDictionary) -> OSStatus {
-        calls.append("delete"); queries.append(query as! [String: Any]); return deleteStatus
+        let dict = query as! [String: Any]
+        calls.append("delete"); queries.append(dict)
+        if var storage, let account = dict[kSecAttrAccount as String] as? String {
+            storage.removeValue(forKey: account)
+            self.storage = storage
+        }
+        return deleteStatus
     }
 }
