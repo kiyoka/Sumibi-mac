@@ -30,10 +30,46 @@ struct DecisionsSettingsStore {
         return settings
     }
 
-    func save(_ settings: DecisionsSettings) throws {
+    func save(_ settings: DecisionsSettings, conversionEndpoint: String? = nil) throws {
         guard settings.isValid else { throw DecisionsError.invalidSettings }
         defaults.set(try JSONEncoder().encode(settings), forKey: "decisionsSettings")
+        if settings.consent {
+            let explicit = conversionEndpoint?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let recorded = defaults.string(forKey: "decisionsConsentConversionEndpoint")
+            let fallback = SettingsStore(defaults: defaults, prototypeDefaults: { nil }).loadProviderConfiguration().endpoint
+            let target = (explicit?.isEmpty == false ? explicit : nil) ?? recorded ?? fallback
+            if !target.isEmpty {
+                defaults.set(target, forKey: "decisionsConsentConversionEndpoint")
+            }
+        } else {
+            defaults.removeObject(forKey: "decisionsConsentConversionEndpoint")
+        }
         touchRevision()
+    }
+
+    /// Decisionsの自動送信同意が、指定した変換接続先に対して与えられているか。
+    /// 変換接続先を切り替えた場合は再同意が必要になる。
+    func hasConsent(forConversionEndpoint endpoint: String) -> Bool {
+        let normalized = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty, load().consent else { return false }
+        if let recorded = defaults.string(forKey: "decisionsConsentConversionEndpoint") {
+            return recorded == normalized
+        }
+        return DecisionsCoordinator.isOfficialOpenAI(normalized)
+    }
+
+    /// 変換接続先が変更されたときに、自動変換をオフにし同意を取り直す状態へ戻す。
+    func revokeConsentAndDisable() {
+        var current = load()
+        let hadActiveState = current.enabled || current.consent
+            || defaults.object(forKey: "decisionsConsentConversionEndpoint") != nil
+        current.enabled = false
+        current.consent = false
+        defaults.removeObject(forKey: "decisionsConsentConversionEndpoint")
+        if hadActiveState, let encoded = try? JSONEncoder().encode(current) {
+            defaults.set(encoded, forKey: "decisionsSettings")
+            touchRevision()
+        }
     }
 
     var revision: Int { defaults.integer(forKey: "decisionsSettingsRevision") }

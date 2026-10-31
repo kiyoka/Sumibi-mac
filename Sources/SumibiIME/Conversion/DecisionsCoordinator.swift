@@ -30,15 +30,18 @@ struct DecisionsCoordinator {
     func prepare(observation: DecisionsObservation, settings: DecisionsSettings) throws -> AmbientWork {
         guard settings.permitsSending, store.load() == settings else { throw DecisionsError.invalidSettings }
         let provider = manualSettings.loadProviderConfiguration()
-        guard provider.provider == .openAI, Self.isOfficialOpenAI(provider.endpoint) else {
+        guard Self.isSupportedConversionProvider(provider) else {
             throw DecisionsError.unsupportedProvider
+        }
+        guard store.hasConsent(forConversionEndpoint: provider.endpoint) else {
+            throw DecisionsError.invalidSettings
         }
         guard manualSettings.hasConsent(for: provider.endpoint) else { throw ConversionError.consentMissing }
         let dictionary = manualSettings.loadUserDictionary()
         let request = AmbientText.request(source: observation.text, dictionary: dictionary)
         try ConversionLimit.check(request)
         _ = try conversion.service()
-        guard let key = try? keys.load(for: provider.endpoint, settings: manualSettings), !key.isEmpty else {
+        guard let key = try? keys.load(for: ProviderConfiguration.defaultEndpoint, settings: manualSettings), !key.isEmpty else {
             throw DecisionsError.missingKey
         }
         let decisions = makeDecisions(key, settings)
@@ -48,10 +51,22 @@ struct DecisionsCoordinator {
             convert: { await conversion.convert(request) },
             remainsAuthorized: {
                 store.revision == revision && store.load() == settings
+                    && store.hasConsent(forConversionEndpoint: provider.endpoint)
                     && manualSettings.loadProviderConfiguration() == provider
                     && manualSettings.loadUserDictionary() == dictionary
                     && manualSettings.hasConsent(for: provider.endpoint)
             }, scoreBatch: { try await decisions.scores($0) })
+    }
+
+    static func isSupportedConversionProvider(_ configuration: ProviderConfiguration) -> Bool {
+        switch configuration.provider {
+        case .openAI:
+            isOfficialOpenAI(configuration.endpoint)
+        case .google:
+            isOfficialGoogle(configuration.endpoint)
+        case .other:
+            false
+        }
     }
 
     static func isOfficialOpenAI(_ endpoint: String) -> Bool {
@@ -59,5 +74,15 @@ struct DecisionsCoordinator {
         return url.scheme?.lowercased() == "https" && url.host?.lowercased() == "api.openai.com"
             && (url.port == nil || url.port == 443) && url.user == nil && url.password == nil
             && url.query == nil && url.fragment == nil && ["", "/", "/v1", "/v1/"].contains(url.path)
+    }
+
+    static func isOfficialGoogle(_ endpoint: String) -> Bool {
+        guard let url = URL(string: endpoint) else { return false }
+        return url.scheme?.lowercased() == "https"
+            && url.host?.lowercased() == "generativelanguage.googleapis.com"
+            && (url.port == nil || url.port == 443)
+            && url.user == nil && url.password == nil
+            && url.query == nil && url.fragment == nil
+            && ["/v1beta/openai", "/v1beta/openai/"].contains(url.path)
     }
 }

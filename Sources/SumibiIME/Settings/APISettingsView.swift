@@ -126,9 +126,13 @@ struct APISettingsView: View {
                     Text(DecisionsError.unsupportedProvider.message)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                } else if model.savedProvider == .google {
+                    Text("現在の変換接続先はGoogle（Gemini API）です。判定はOpenAI Decisionsで行われるため、Decisions設定画面でOpenAI用APIキーと自動送信への同意を設定してください。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
             } footer: {
-                Text("OpenAI Decisionsで日本語らしさを判定し、自動変換する機能です。公式OpenAI接続先と既存の変換用キーを使い、自動送信への同意を別途設定します（Googleや「その他」では使えません）。")
+                Text("OpenAI Decisionsで日本語らしさを判定し、現在の変換接続先（OpenAIまたはGoogle）で自動変換する機能です。変換接続先を変更した場合は、自動変換がオフになり再同意が必要です（「その他」では使えません）。")
                     .font(.footnote).foregroundStyle(.secondary)
             }
 
@@ -249,7 +253,9 @@ struct APISettingsView: View {
                 userDictionary = saved
             }
         }
-        .sheet(isPresented: $isShowingDecisionsSettings) { DecisionsSettingsView() }
+        .sheet(isPresented: $isShowingDecisionsSettings, onDismiss: { model.refreshAfterDecisionsSheet() }) {
+            DecisionsSettingsView()
+        }
         .sheet(isPresented: $isShowingMozcLicense) { MozcLicenseView() }
         .sheet(isPresented: $isShowingDiagnostics) { DiagnosticsSettingsView() }
         .confirmationDialog("保存したAPIキーを削除しますか？",
@@ -333,12 +339,15 @@ final class APISettingsModel {
     private var isUpdatingEndpointInternally = false
     private let settings: SettingsStore
     private let keys: APIKeyStore
+    private let decisions: DecisionsSettingsStore
     private let onConfigurationSaved: () -> Void
 
     init(settings: SettingsStore = SettingsStore(), keys: APIKeyStore = APIKeyStore(),
+         decisions: DecisionsSettingsStore? = nil,
          onConfigurationSaved: @escaping () -> Void = {}) {
         self.settings = settings
         self.keys = keys
+        self.decisions = decisions ?? DecisionsSettingsStore(defaults: settings.defaults)
         self.onConfigurationSaved = onConfigurationSaved
     }
 
@@ -349,6 +358,8 @@ final class APISettingsModel {
 
     var showsAPIKeyEditor: Bool { !hasStoredAPIKey || isEditingAPIKey }
 
+    var savedProvider: AIProvider { savedConfiguration.provider }
+
     var savedProviderDisplay: String { savedConfiguration.provider.displayName }
 
     var savedEndpointDisplay: String {
@@ -356,7 +367,12 @@ final class APISettingsModel {
     }
 
     var isDecisionsSupported: Bool {
-        savedConfiguration.provider == .openAI && DecisionsCoordinator.isOfficialOpenAI(savedConfiguration.endpoint)
+        DecisionsCoordinator.isSupportedConversionProvider(savedConfiguration)
+    }
+
+    func refreshAfterDecisionsSheet() {
+        guard apiKey.isEmpty else { return }
+        refreshStoredAPIKeyDisplay(for: endpoint)
     }
 
     func selectProvider(_ newProvider: AIProvider) {
@@ -434,18 +450,21 @@ final class APISettingsModel {
 
         do {
             let normalized = configuration.normalized
+            let previousProvider = savedConfiguration.provider
             let previousEndpoint = savedConfiguration.endpoint
+            let providerChanged = normalized.provider != previousProvider
             let endpointChanged = normalized.endpoint != previousEndpoint
-            if endpointChanged, !previousEndpoint.isEmpty {
+            if (providerChanged || endpointChanged), !previousEndpoint.isEmpty {
                 try? keys.migrateLegacyKey(for: previousEndpoint, settings: settings)
             }
             try settings.saveProviderConfiguration(normalized)
             savedConfiguration = normalized
             draftConfigurations[normalized.provider] = normalized
-            if endpointChanged {
-                // 送信先が変わったので、同意は取り直してもらう。
+            if providerChanged || endpointChanged {
+                // 変換の接続先・送信先が変わったので、変換同意とDecisions自動変換（および同意）を取り直してもらう。
                 settings.revokeConsent()
                 hasConsent = false
+                decisions.revokeConsentAndDisable()
             }
             setProviderInternally(normalized.provider)
             setEndpointInternally(normalized.endpoint)

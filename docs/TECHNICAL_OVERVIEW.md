@@ -129,8 +129,7 @@ flowchart TB
 | 一時デバッグの本文 | 明示オン時のみメモリ表示、再起動後オフ。オフ・設定変更・次の試行等で破棄 | ログ・UserDefaults・ファイルへ保存しない。mainとPR #66の表示範囲の差を区別する |
 | 診断ログ | DiagnosticLogへ固定分類・数値だけを渡す | OSログへ出力。通常は失敗分類、詳細ログ有効時は数値も含む。本文・キー・URL・生応答・アプリ名は出さない |
 
-自動送信は既定オフで、親設定の送信同意に加え独立した自動送信同意、公式OpenAI接続先、
-共有キーが必要。`DecisionsCoordinator.prepare`は認可済みの仕事を組み立てるだけで通信しない。
+自動送信は既定オフで、親設定の変換送信同意に加え、現在の変換接続先（公式`OpenAI`または公式`Google`、「その他」は不可）に対する独立した自動送信同意、判定用のOpenAIキー（`endpoint:https://api.openai.com`）、および変換接続先のキーが必要。変換接続先を切り替えた場合は自動変換がオフになり再同意が必要になる。`DecisionsCoordinator.prepare`は認可済みの仕事を組み立てるだけで通信しない。
 送信前・結果適用前にも設定や認可が維持されているか検査する。手動と自動の適用条件を一括して
 同一とは扱わない。根拠は[ConversionCoordinator](../Sources/SumibiIME/Conversion/ConversionCoordinator.swift)、
 [DecisionsCoordinator](../Sources/SumibiIME/Conversion/DecisionsCoordinator.swift)、
@@ -171,7 +170,7 @@ Runtimeは状態機械・範囲追跡・通信・候補表示と、最新コン�
 [AmbientConversionLifecycle](../Sources/SumibiIME/Conversion/AmbientConversionLifecycle.swift)が
 未確定入力を200msの固定窓で保持し、最大32状態を名前付きpredicate質問として判定する。
 モデルは`gpt-6-luna`、既定閾値0.5、判定タイムアウト10秒。既定オフで、親画面の変換同意と
-独立した自動送信同意、公式OpenAI接続先と共有キーが必要。旧Jev通信は廃止した。
+独立した自動送信同意、公式`OpenAI`または公式`Google`の変換接続先、および判定用OpenAIキーと変換用キーが必要。旧Jev通信は廃止した。
 
 自動変換中の入力は即時処理し、古い結果を世代・原文・対象で照合して破棄する。
 判定・漢字変換・読取確認を直列化し、未送信256状態、累積通信10,000回という別の上限を持つ。

@@ -105,8 +105,10 @@ final class APISettingsModelTests: XCTestCase {
         let keys = RecordingKeychain(storage: [:])
         let domain = "org.sumibi.tests.settings-model.\(UUID().uuidString)"
         domains.append(domain)
-        let settings = SettingsStore(defaults: UserDefaults(suiteName: domain)!, prototypeDefaults: { nil })
-        let model = APISettingsModel(settings: settings, keys: APIKeyStore(keychain: keys))
+        let defaults = UserDefaults(suiteName: domain)!
+        let settings = SettingsStore(defaults: defaults, prototypeDefaults: { nil })
+        let decisions = DecisionsSettingsStore(defaults: defaults)
+        let model = APISettingsModel(settings: settings, keys: APIKeyStore(keychain: keys), decisions: decisions)
 
         model.reload()
         XCTAssertEqual(model.provider, .openAI)
@@ -120,6 +122,14 @@ final class APISettingsModelTests: XCTestCase {
         XCTAssertTrue(model.hasConsent)
         XCTAssertEqual(model.storedAPIKeyDisplay, "****1111")
         XCTAssertTrue(model.isDecisionsSupported)
+
+        // Enable Decisions automatic conversion while on OpenAI.
+        var decisionsSettings = DecisionsSettings()
+        decisionsSettings.enabled = true
+        decisionsSettings.consent = true
+        try? decisions.save(decisionsSettings, conversionEndpoint: model.endpoint)
+        XCTAssertTrue(decisions.load().enabled)
+        XCTAssertTrue(decisions.load().consent)
 
         // Switch to Google
         model.selectProvider(.google)
@@ -141,8 +151,12 @@ final class APISettingsModelTests: XCTestCase {
         model.save()
         XCTAssertFalse(model.hasUnsavedChanges)
         XCTAssertFalse(model.hasConsent)
-        XCTAssertFalse(model.isDecisionsSupported)
+        XCTAssertTrue(model.isDecisionsSupported)
         XCTAssertEqual(model.storedAPIKeyDisplay, "****2222")
+        // Saving a changed conversion provider must turn off Decisions and revoke Decisions consent.
+        XCTAssertFalse(decisions.load().enabled)
+        XCTAssertFalse(decisions.load().consent)
+        XCTAssertFalse(decisions.hasConsent(forConversionEndpoint: model.endpoint))
 
         model.setConsent(true)
         XCTAssertTrue(model.hasConsent)

@@ -50,14 +50,14 @@ main・PR・作業版の区別と最新の調査状況は[実装照合記録](IM
 通常版へ更新・起動し、インストール後の構成・署名検査に成功した。
 保存済みの閾値・同意・キーは変更せず、詳細診断ログの有効設定も維持した。
 
-親画面の既存のOpenAI変換用キーを使用する。別のDecisionsキー項目は作らない。
-接続先がOpenAI（`https://api.openai.com`、標準ポート、認証情報・クエリなし）に設定された場合だけ使い、
-Google（Gemini）や「その他」（カスタムOpenAI互換サーバー）の設定時・他社のキーをDecisionsへ送信しない。
-Googleまたは「その他」が選ばれている間は、設定画面でDecisions自動変換が使えない理由を表示し、
-自動判定の監視・OpenAIへの送信・判定のみOpenAI／変換のみGoogleのような混在構成は行わない。
-親画面の変換への送信同意と、この画面の自動送信への独立した同意の両方を必要とする。
-親画面でキーを保存・変更する。自動変換画面では短い伏せ字の参照表示だけで、
-共有キーの保存・削除操作は設けない。同意取消では自動変換をオフにする。
+判定用のOpenAI APIキーには、`OpenAI`接続先のKeychain項目（`account = "endpoint:https://api.openai.com"`）を使用する。別のDecisionsキー項目は作らない。
+#71により、変換接続先が公式`OpenAI`（`https://api.openai.com`）または公式`Google`（`https://generativelanguage.googleapis.com/v1beta/openai`）に設定された場合に利用できる（「その他」のカスタムOpenAI互換サーバーでは利用できない）。
+- 判定は常に公式OpenAI（`https://api.openai.com/v1/decisions`、`gpt-6-luna`）へOpenAI用APIキーで送信し、閾値以上で現在の変換接続先（`OpenAI`または`Google`）へそれぞれの変換用APIキーで漢字変換を要求する。
+- GoogleキーをDecisionsへ送信したり、OpenAIキーをGoogleへ送信したりはしない。
+- `Google`選択時はOpenAI（判定）とGoogle（変換）の双方にそれぞれの料金が発生する。
+- 自動変換画面では、判定用OpenAI APIキー（`endpoint:https://api.openai.com`）の短い伏せ字表示と**入力・変更（更新）**を行える。誤って手動変換用のOpenAIキーを消去しないよう、自動変換画面にはキーの削除操作を設けない（削除は親画面で`OpenAI`を選択して行う）。また、現在の変換接続先（接続先名・URL・モデル・キー有無・同意状態）を読み取り専用で表示する。
+- 親画面での現在の変換接続先への送信同意と、この画面での現在の変換接続先に対する自動送信同意（`decisionsConsentConversionEndpoint`）の両方を必要とする。
+- **変換接続先（`OpenAI`⇄`Google`やURL）を変更した場合は、自動変換を自動的にオフにし、Decisionsの同意もリセットして再同意を必須とする**。また同意取消でも自動変換をオフにする。
 
 旧`jevSettings`からは有効な閾値と回数上限だけを移す。旧Jevの有効化・TypeSafeへの
 同意・モデル・回数をDecisionsへ転用せず、自動変換オフ・同意なし・回数0で始める。

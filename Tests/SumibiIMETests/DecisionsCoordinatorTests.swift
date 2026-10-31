@@ -88,14 +88,40 @@ final class DecisionsCoordinatorTests: XCTestCase {
         for endpoint in ["https://api.openai.com", "https://api.openai.com/v1", "https://api.openai.com:443/v1/"] {
             XCTAssertTrue(DecisionsCoordinator.isOfficialOpenAI(endpoint))
         }
+        for endpoint in [
+            "https://generativelanguage.googleapis.com/v1beta/openai",
+            "https://generativelanguage.googleapis.com:443/v1beta/openai/"
+        ] {
+            XCTAssertTrue(DecisionsCoordinator.isOfficialGoogle(endpoint))
+        }
+        for endpoint in [
+            "http://generativelanguage.googleapis.com/v1beta/openai",
+            "https://generativelanguage.googleapis.com/v1beta",
+            "https://generativelanguage.googleapis.com.evil.invalid/v1beta/openai",
+            "https://generativelanguage.googleapis.com:444/v1beta/openai",
+            "https://generativelanguage.googleapis.com/v1beta/openai?redirect=x"
+        ] {
+            XCTAssertFalse(DecisionsCoordinator.isOfficialGoogle(endpoint))
+        }
+        // Even if the URL matches OpenAI or Google, .other provider is rejected.
+        for endpoint in [AIProvider.openAI.defaultEndpoint, AIProvider.google.defaultEndpoint, "https://custom.example.com/v1"] {
+            let f = try make()
+            try f.manual.saveProviderConfiguration(.init(endpoint: endpoint, model: "dummy", provider: .other))
+            f.manual.saveConsent(for: endpoint)
+            XCTAssertThrowsError(try f.coordinator().prepare(observation: f.observation, settings: f.store.load())) {
+                XCTAssertEqual($0 as? DecisionsError, .unsupportedProvider)
+            }
+            XCTAssertTrue(f.decisionsKeys.calls.isEmpty)
+            XCTAssertTrue(f.manualKeys.calls.isEmpty)
+        }
     }
 
-    func testGoogleProviderIsRejectedBeforeReadingAnyKeyAndInvalidatesPreparedWorkOnSwitch() throws {
+    func testSwitchingToGoogleInvalidatesPreparedWorkAndRequiresReconsentBeforeReadingAnyKey() throws {
         let f = try make()
         let work = try f.coordinator().prepare(observation: f.observation, settings: f.store.load())
         XCTAssertTrue(work.remainsAuthorized())
 
-        // Reset recorded key calls and switch to Google while Decisions remains enabled.
+        // Reset recorded key calls and switch to Google while Decisions settings were consented for OpenAI.
         f.decisionsKeys.calls = []
         f.manualKeys.calls = []
         let google = ProviderConfiguration(
@@ -109,13 +135,78 @@ final class DecisionsCoordinatorTests: XCTestCase {
         // Previously prepared work is immediately invalidated.
         XCTAssertFalse(work.remainsAuthorized())
 
-        // New prepare attempt is rejected before reading Google's key or reserving calls.
+        // Without re-consenting to Decisions for the new Google conversion endpoint, prepare fails before reading keys.
         XCTAssertThrowsError(try f.coordinator().prepare(observation: f.observation, settings: f.store.load())) {
-            XCTAssertEqual($0 as? DecisionsError, .unsupportedProvider)
+            XCTAssertEqual($0 as? DecisionsError, .invalidSettings)
         }
         XCTAssertTrue(f.decisionsKeys.calls.isEmpty)
         XCTAssertTrue(f.manualKeys.calls.isEmpty)
         XCTAssertEqual(f.store.calls, 0)
+    }
+
+    func testGoogleProviderUsesOpenAIKeyForDecisionsAndGoogleKeyForConversionWithoutCrossingKeys() async throws {
+        let f = try make()
+        let google = ProviderConfiguration(
+            provider: .google,
+            endpoint: AIProvider.google.defaultEndpoint,
+            model: GeminiModelOption.quality.rawValue
+        )
+        try f.manual.saveProviderConfiguration(google)
+        f.manual.saveConsent(for: google.endpoint)
+        try f.store.save(f.store.load(), conversionEndpoint: google.endpoint)
+
+        let sharedKeychain = RecordingKeychain(storage: [
+            "endpoint:https://api.openai.com": Data("sk-openai-decisions-key".utf8),
+            "endpoint:https://generativelanguage.googleapis.com/v1beta/openai": Data("AIzaSy-google-conversion-key".utf8)
+        ])
+        var capturedDecisionsKey: String?
+        var capturedConversionConfig: OpenAICompatibleConfiguration?
+        let conversion = ConversionCoordinator(
+            settings: f.manual,
+            keys: APIKeyStore(keychain: sharedKeychain),
+            responseMode: { "api" },
+            makeClient: { config in
+                capturedConversionConfig = config
+                return f.converter
+            }
+        )
+        let coordinator = DecisionsCoordinator(
+            store: f.store,
+            manualSettings: f.manual,
+            keys: APIKeyStore(keychain: sharedKeychain),
+            conversion: conversion,
+            makeDecisions: { key, _ in
+                capturedDecisionsKey = key
+                return FixedDecisionsScore()
+            }
+        )
+
+        let work = try coordinator.prepare(observation: f.observation, settings: f.store.load())
+        XCTAssertEqual(capturedDecisionsKey, "sk-openai-decisions-key")
+        XCTAssertEqual(capturedConversionConfig?.endpoint, URL(string: google.endpoint))
+        XCTAssertEqual(capturedConversionConfig?.model, google.model)
+        XCTAssertEqual(capturedConversionConfig?.apiKey, "AIzaSy-google-conversion-key")
+
+        let score = try await work.score(f.observation)
+        XCTAssertEqual(score, 0.9)
+        let converted = await work.convert()
+        XCTAssertEqual(converted, Result<ConversionResult, ConversionError>.success(ConversionResult(candidates: ["日本語"])))
+
+        // If OpenAI key is missing while Google key exists, prepare fails with .missingKey.
+        sharedKeychain.storage?["endpoint:https://api.openai.com"] = nil
+        XCTAssertThrowsError(try coordinator.prepare(observation: f.observation, settings: f.store.load())) {
+            XCTAssertEqual($0 as? DecisionsError, .missingKey)
+        }
+
+        // If Google key is missing, prepare fails before reading the OpenAI key.
+        sharedKeychain.storage?["endpoint:https://api.openai.com"] = Data("sk-openai-decisions-key".utf8)
+        sharedKeychain.storage?["endpoint:https://generativelanguage.googleapis.com/v1beta/openai"] = nil
+        sharedKeychain.queries = []
+        XCTAssertThrowsError(try coordinator.prepare(observation: f.observation, settings: f.store.load())) {
+            XCTAssertEqual($0 as? ConversionError, .apiKeyMissing)
+        }
+        let queriedAccounts = sharedKeychain.queries.compactMap { $0[kSecAttrAccount as String] as? String }
+        XCTAssertFalse(queriedAccounts.contains("endpoint:https://api.openai.com"))
     }
 
     func testPreparedConversionUsesExistingProviderAndStripsTriggerPunctuation() async throws {
