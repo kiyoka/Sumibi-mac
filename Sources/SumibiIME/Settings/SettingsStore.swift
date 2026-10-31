@@ -17,7 +17,7 @@ struct SettingsStore {
         static let usageStatistics = "usageStatistics"
     }
 
-    private let defaults: UserDefaults
+    let defaults: UserDefaults
     private let prototypeDefaults: () -> UserDefaults?
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
