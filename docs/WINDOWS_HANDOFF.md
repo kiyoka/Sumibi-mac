@@ -11,10 +11,17 @@ Windows用リポジトリの作成、コード移植、配布や署名は本作�
 3. [SPEC](SPEC.md)で合意要件を読み、未実装の要件を現在の機能として取り込まない。
 4. [技術解説](TECHNICAL_OVERVIEW.md)、[Tests/README](../Tests/README.md)からコードと回帰ケースを参照する。
 
+構成は[全体アーキテクチャ図](TECHNICAL_OVERVIEW.md#runtime-architecture)、
+[手動／自動の非同期経路](TECHNICAL_OVERVIEW.md#conversion-flows)、
+[メモリ・保存・送信](TECHNICAL_OVERVIEW.md#data-boundaries)、
+[所有と寿命](INPUT_CONTROLLER_ARCHITECTURE.md#ownership-diagram)で追える。
+図は2026-10-20のmain `d2b96fc`を基準とし、未統合の診断画面PR #66は注記だけで区別する。
+図のMac固有アダプターをそのままWindowsのAPIやプロセス設計として採用しない。
+
 基準mainは`d2b96fc`（PR #65まで）。記号サポートもPR #61でmain統合済み。
-原文比較と診断画面は#62対応ブランチに実装。現在の実機アプリがmainと同じ内容とは限らない。
-将来参照するときはPRの統合状態を再確認し、対象コミットを固定する。
-APIキー・ユーザー設定・入力履歴・署名秘密鍵を引き継ぎ資料へコピーしない。
+原文比較と診断画面は#62のPR #66に収録し、図の基準mainとは区別する。
+現在の実機アプリがmainと同じ内容とは限らない。将来参照するときはPRの状態を再確認し、
+対象コミットを固定する。APIキー・ユーザー設定・入力履歴・署名秘密鍵を引き継ぎ資料へコピーしない。
 
 ## 2. 共通の製品動作
 

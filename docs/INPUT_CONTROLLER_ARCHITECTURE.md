@@ -21,6 +21,42 @@ Issue #45では機能・入力ソース識別子・設定保存先を変更せ�
 
 ## なぜ共有するか
 
+<a id="ownership-diagram"></a>
+### 所有と接続の補助図（2026-10-20、Issue #64）
+
+基準はmain `d2b96fc`。全体構成・通信は[技術解説の全体図](TECHNICAL_OVERVIEW.md#runtime-architecture)へ集約し、
+ここでは寿命だけを示す。実線は保持・所有、破線は弱参照または呼出し時の接続。
+プロセス共有は、複数文書を独立管理する意味ではない。
+
+```mermaid
+%%{init: {"flowchart": {"htmlLabels": false}}}%%
+flowchart LR
+    root["InputRuntime.shared<br/>プロセス寿命"]
+    imk["IMK：生成・再生成"] --> ctl["入力コントローラー<br/>短命"]
+    ctl -.->|"共有状態を利用"| root
+    root -.->|"latest：weak"| ctl
+    root -->|"lastHandler：直前のハンドラーを保持"| ctl
+    root --> state["InputSession：経路の状態"]
+    root --> tracker["範囲追跡：対象・アンカー"]
+    root --> manual["手動：Task・応答・タイマー"]
+    root --> auto["自動：世代・観測バッチ・Task"]
+    root --> verify["手動結果：読取再確認Task"]
+    root --> display["固定エラー・状態印"]
+    root --> present["CandidatePresenter"]
+    present --> window["CandidateWindow：遅延生成"]
+    window -.->|"選択コールバックはweak controller"| ctl
+    root -->|"lastInput：保持"| client["IMKTextInputへの接続"]
+```
+
+`lastHandler`と`lastInput`の参照が残っていても、入力先の同一性・範囲・原文が照合できるとは限らない。
+Runtimeは入力先変更で要求・追跡を取り消す。`InputEffectApplier`・`AmbientResultApplier`は
+呼出しごとの値で、独立した長寿命の状態所有者ではない。
+根拠：[InputRuntime](../Sources/SumibiIME/InputRuntime.swift)、
+[候補表示](../Sources/SumibiIME/CandidatePresenter.swift)、
+[コントローラー](../Sources/SumibiIME/SumibiInputController.swift)。
+
+### 再生成と入力先変更
+
 この開発環境のmacOS 27では、IMEがキーを消費した直後にもコントローラーが終了・再生成されることを観測している。コントローラーの寿命を文書や入力欄の寿命とみなすと、入力途中の状態・非同期応答・候補窓を失う。そのためRuntimeと各処理の所有者は、短いセッション再生成をまたいで保持する。
 
 これは複数の文書の状態を同時に管理する実装ではない。既存の入力先変更・対象外アプリ・Escの処理で通信とタイマーを取り消し、要求IDと入力先の範囲・原文の照合で古い応答や異なる文字列の置換を拒否する。コントローラー再生成と実際の入力先変更を区別する。他のOS・入力先での挙動は実機確認が必要。

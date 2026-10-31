@@ -2,8 +2,12 @@
 
 ## 1. 文書の範囲と状態
 
-2026-10-20、Issue #63でコードと照合した実装の説明。基準mainは`9eab93c`（PR #59〜#61まで）。
-記号サポートはPR #61でmainへ統合済み。原文比較・診断画面の独立化は#62対応ブランチの変更として区別する。
+2026-10-20、Issue #64で図とコードを照合した実装の説明。
+基準mainは`d2b96fc2d2e7bf08a597e2ba46132712b6785d93`（PR #65まで）。
+記号サポートはPR #61でmainへ統合済み。原文比較・診断画面の独立化は
+[PR #66](https://github.com/kiyoka/Sumibi-mac/pull/66)として区別する。
+2026-10-31、PR #67の図を保持したままPR #66へmainを取り込み、画面の説明を追従させた。
+以下の図は元の基準mainを表し、PR #66による変更点は注記で示す。
 今回は文書の更新であり、機能・保存形式・製品仕様を変更しない。
 
 [SPEC](SPEC.md)は合意した要件であり、全機能の実装完了を意味しない。本書では「実装済み」「未実装の要件」「観測・実機確認」「将来案」を分ける。仕様とコードの差、参照したコード・テストは[実装照合記録](IMPLEMENTATION_AUDIT.md)に記載する。以前の設計案と詳しいアプリ別の調査は[旧技術解説](TECHNICAL_OVERVIEW_HISTORY.md)・[Issue #4の調査記録](ISSUE_4_PROTOTYPE.md)へ保存した。
@@ -26,12 +30,111 @@ Sumibi.app / 実行ファイル Sumibi
 │     └─ CandidatePresenter → CandidateWindow: 独自候補窓
 ├─ MenuBarController: NSStatusItem・ログイン項目
 └─ SettingsWindowController → APISettingsView: SwiftUI設定・辞書・Decisions
-   └─ DiagnosticsSettingsView: 独立した一時デバッグ（#62作業版）
+   └─ 一時デバッグ: mainではDecisionsSettingsView内
 ```
 
 通常起動は[SumibiMain](../Sources/SumibiIME/SumibiMain.swift)がInfo.plistのBundle IDと接続名からIMKServerを作り、その寿命をイベントループ中保持する。同じプロセスでメニューバーを設置し、設定ウィンドウを必要時に開く。別の設定アプリ・常駐ヘルパー・App Groupは現行構成にない。別アプリへの分離は将来再設計する場合の案であり、配布の成立条件ではない。
 
 Packageは`Sumibi`、モジュールは`SumibiCore`と`SumibiIME`。バンドル素材は`App/`、開発ツールは`Development/`。登録ID・設定・Keychainの互換性と通常／開発ビルドは[ビルドモード](BUILD_MODES.md)を参照。
+
+<a id="runtime-architecture"></a>
+### 2.1 全体アーキテクチャ図
+
+以下は**基準mainの実行時**。枠はプロセス／モジュールの境界、実線矢印はイベント・呼出し・
+読取／書込・要求／応答、破線矢印は表示用情報・設定や資産の参照を表す。
+双方向線は両方向のやり取りであり、共有メモリや所有を意味しない。
+主経路だけを描き、同意・保存・通信の詳細は[データ境界](#data-boundaries)、
+所有関係は[寿命の補助図](INPUT_CONTROLLER_ARCHITECTURE.md#ownership-diagram)へ分ける。
+
+```mermaid
+%%{init: {"flowchart": {"htmlLabels": false}}}%%
+flowchart TB
+    subgraph host["入力先アプリ：別プロセス"]
+        editor["入力欄・選択範囲・標準Undo履歴"]
+    end
+    imk["macOS入力メソッド基盤"]
+    subgraph sumibi["Sumibi.app：単一プロセス（macOS）"]
+        subgraph ime["SumibiIME：Mac接続・制御・UI"]
+            adapter["IMKアダプター"]
+            runtime["InputRuntime<br/>shared"]
+            manual["手動要求・反映待ち"]
+            ambient["自動判定・変換・確認"]
+            apply["原文・範囲照合と書込"]
+            coord["送信前の設定・認可確認"]
+            ui["候補・メニュー・状態印"]
+            settings["設定UI・設定／キー保存"]
+        end
+        subgraph core["SumibiCore"]
+            session["InputSession"]
+            clients["非同期HTTPクライアント"]
+            dict["ローカル候補補完"]
+        end
+    end
+    api["外部サービス：変換API / OpenAI Decisions"]
+    stores["Mac内の永続保存：UserDefaults / Keychain"]
+    assets["アプリ同梱：辞書索引・ライセンス"]
+    editor <-->|"キー・範囲・編集"| imk
+    imk <-->|"イベント・入力接続"| adapter
+    adapter --> runtime
+    runtime --> session
+    runtime --> manual
+    runtime --> ambient
+    adapter --> apply
+    apply <-->|"読取・確定・置換"| adapter
+    manual --> coord
+    ambient --> coord
+    coord --> clients
+    clients <-->|"判定と変換は別要求"| api
+    coord --> dict
+    assets -.-> dict
+    settings <--> stores
+    settings -.-> coord
+    runtime -.-> ui
+```
+
+`SumibiMain`がIMKServerとAppKitイベントループを維持する。図のCoreは別プロセスではなく
+同じ実行ファイルのモジュールであり、通信クライアントも含む。状態機械・辞書検索は移植時に
+参照しやすいが、**SumibiCore全体のWindows互換を検証済みとは扱わない**。
+現行PackageはmacOS対象で、Foundationの通信・文字列処理も移植先で検証する。
+設定UIも同一プロセスで、KeychainはOSの保存サービス。別設定アプリや独立ヘルパーは描いていない。
+図の短い責務名に対応する型は、直前の構成ツリーと次の表、
+[所有者の責務表](INPUT_CONTROLLER_ARCHITECTURE.md)を参照する。
+
+「原文・範囲照合と書込」は次の協調処理をまとめたもの。
+
+| 責務 | 実装と境界 |
+| --- | --- |
+| 観測時の範囲・原文照合 | [AmbientInputSnapshot](../Sources/SumibiIME/Conversion/AmbientInputSnapshot.swift)。正確な未確定範囲を読み、周辺全文探索をしない |
+| 原文・対象・アンカーの照合 | [TextReplacementTracker](../Sources/SumibiIME/TextReplacementTracker.swift)。読取だけで、書込はしない |
+| 手動の効果・入力先への書込 | [InputEffectApplier](../Sources/SumibiIME/InputEffectApplier.swift) → [InputClient / IMKInputClient](../Sources/SumibiIME/InputClient.swift) |
+| 自動の確定・照合・置換 | [AmbientResultApplier](../Sources/SumibiIME/Conversion/AmbientResultApplier.swift)。同じInputSession・書込アダプターを使い、未照合なら結果を書かない |
+| 置換後の読取確認 | 手動の[ConversionResultVerifier](../Sources/SumibiIME/Conversion/ConversionResultVerifier.swift)、自動の[AmbientResultVerification](../Sources/SumibiIME/Conversion/AmbientResultApplier.swift)。再書込ではない |
+
+**PR／将来案の区分：** PR #66は一時デバッグを独立した`DiagnosticsSettingsView`へ移し、
+観測時の原文比較を追加する。上図のmainではDecisions設定内のメモリ表示であり、独立画面が
+統合済みとは読まない。周辺文脈・文体・一般利用額集計・Windowsの方式はこの図に含めない。
+
+<a id="data-boundaries"></a>
+### 2.2 メモリ・保存・送信の境界
+
+| 情報 | プロセス内メモリ／表示 | 永続保存・外部への境界 |
+| --- | --- | --- |
+| 原文・待機入力・候補・救済文字 | InputSession、Runtime、通信／反映待ち、候補UI | 通常ログ・設定へ保存しない。変換対象は同意した変換APIへ送る。救済文字のコピーだけ利用者操作でクリップボードへ書く |
+| 接続先・モデル・送信先ごとの同意・登録ユーザー辞書 | 設定UI、ConversionCoordinator | SettingsStore → UserDefaults。登録辞書は変換要求に添付。ローカル候補辞書の索引とは別 |
+| 自動変換の同意・閾値・回数上限・累積HTTP回数 | DecisionsCoordinator、AmbientConversionLifecycle | DecisionsSettingsStore → UserDefaults。上限は請求額ではない |
+| APIキー | APIKeyStoreから通信設定へ読み出す。画面は短い伏せ字 | Keychainのみ（端末限定・同期無効）。HTTP認証ヘッダーで送信し、本文・ログへ混ぜない |
+| 判定対象の入力状態 | 自動変換の固定窓と未送信バッチ | DecisionsへID付き入力状態とpredicate質問を送る。変換APIとは別通信・別課金。判定にはユーザー辞書を添付しない |
+| LLM要求 | 原文、追加候補時の現在結果、登録ユーザー辞書 | ConversionCoordinatorが文字数・接続先・キー・送信同意を確認後に送信。周辺文脈・文体は未実装 |
+| 中黒・Mozc・Sudachi索引 | 追加候補成功時だけローカル補完 | バンドル資産を読む。索引全体をAPIへ送らず、追加通信もしない。API失敗のオフライン代替ではない |
+| 一時デバッグの本文 | 明示オン時のみメモリ表示、再起動後オフ。オフ・設定変更・次の試行等で破棄 | ログ・UserDefaults・ファイルへ保存しない。mainとPR #66の表示範囲の差を区別する |
+| 診断ログ | DiagnosticLogへ固定分類・数値だけを渡す | OSログへ出力。通常は失敗分類、詳細ログ有効時は数値も含む。本文・キー・URL・生応答・アプリ名は出さない |
+
+自動送信は既定オフで、親設定の送信同意に加え独立した自動送信同意、公式OpenAI接続先、
+共有キーが必要。`DecisionsCoordinator.prepare`は認可済みの仕事を組み立てるだけで通信しない。
+送信前・結果適用前にも設定や認可が維持されているか検査する。手動と自動の適用条件を一括して
+同一とは扱わない。根拠は[ConversionCoordinator](../Sources/SumibiIME/Conversion/ConversionCoordinator.swift)、
+[DecisionsCoordinator](../Sources/SumibiIME/Conversion/DecisionsCoordinator.swift)、
+[DiagnosticLog](../Sources/SumibiIME/DiagnosticLog.swift)。
 
 ## 3. 状態の所有者・寿命・入力先変更
 
@@ -78,6 +181,76 @@ Runtimeは状態機械・範囲追跡・通信・候補表示と、最新コン�
 カーソル移動前には原文を確定し、待機と追跡を取り消す。macOSの再生成対策・相対座標の許容条件を
 別OSの保証としない。詳細な状態・費用・実機履歴は[Decisions自動変換](DECISIONS_CONVERSION.md)を参照。
 
+<a id="conversion-flows"></a>
+### 4.2 手動／自動の非同期経路図
+
+矢印は処理順と条件分岐で、所有関係ではない。通信待ちの間に対象が変わるため、
+API成功と適用成功を分ける。入力先の標準Undoに原文を残すための確定と、
+変換結果による置換も別操作である。
+
+**手動（初回・選択変換の主経路）：** 追加候補は同じ通信所有者を使うが、要求時に現在結果を
+書き換えず、成功時の候補選択で照合・置換する。API成功直後の自動置換と混同しない。
+
+```mermaid
+%%{init: {"flowchart": {"htmlLabels": false}}}%%
+flowchart TD
+    key["明示変換キー・要求ID発行"] --> commit["原文確定・対象記録"]
+    commit --> send["上限・同意・キー確認 → 非同期変換"]
+    send --> idcheck{"取消されず現在の要求IDか"}
+    idcheck -->|"いいえ"| drop["遅延応答を破棄：別対象へ書かない"]
+    idcheck -->|"はい"| target{"入力先・選択・原文の範囲照合"}
+    target -->|"入力先が一時無効"| retry["反映先のみ再探索：0.25秒・最大240回"]
+    retry --> target
+    retry -->|"上限到達"| cancel["取消・待機文字の救済：結果を書かない"]
+    target -->|"不一致・読取不能"| cancel
+    target -->|"照合済み"| finish["応答を一度だけ取得・旧タスクとタイマー解除"]
+    finish --> result["成功：再照合して範囲置換／失敗：原文を維持"]
+    result --> drain["待機キーを順に処理・必要なら次の要求"]
+    queue["手動待機中の文字・制御キー：Coreの順序付き待ち行列"] -.-> drain
+```
+
+ネットワークエラーも要求の結果として扱うが、旧入力先へ復旧文字を書かないよう反映前照合を行う。
+置換直前にもアンカーの原文を照合し、成功後は必要に応じて結果を読取確認する。
+待機中の制御キーには再送しないものがある（[第5節](#5-待機入力esc救済)）。
+Esc・実際の入力先変更は要求／タイマーを取り消し、必要な待機文字を救済する。
+
+**自動（入力は待ち行列化しない）：** バッチには入力の観測状態を保持するのであり、
+キーを後から再生するものではない。現在の世代以外の状態が判定されても、その結果を別の原文へ適用しない。
+
+```mermaid
+%%{init: {"flowchart": {"htmlLabels": false}}}%%
+flowchart TD
+    input["通常入力を即時処理・世代更新"] --> snapshot["入力先・Secure Input・範囲・選択・原文の観測"]
+    snapshot --> batch["200ms固定窓・最大32状態ずつ：未送信は最大256状態"]
+    batch --> auth["DecisionsCoordinator：有効化・両同意・接続先・キー・上限"]
+    auth --> score["Decisionsで非同期判定"]
+    score --> current{"最新世代・対象・設定・認可を維持し閾値以上か"}
+    current -->|"いいえ"| discard["見送り／古い応答を破棄：結果を書かない"]
+    current -->|"はい"| convert["変換APIへ別要求"]
+    convert --> recheck{"世代・入力活動・入力先・設定・認可を再確認"}
+    recheck -->|"不成立"| discard
+    recheck -->|"成立"| commit["原文確定 → 全文・対象照合"]
+    commit -->|"原文を読めない"| sourcewait["同じ対象を読取待機：期限0.5秒・再送なし"]
+    sourcewait -->|"全文一致・同じ対象"| write["置換直前も照合 → 結果を一度書込"]
+    sourcewait -->|"不一致・期限切れ"| keep["原文維持・結果は非適用・失敗情報"]
+    commit -->|"不一致"| keep
+    commit -->|"全文一致"| write
+    write --> verify["結果を読取確認：必要なら100ms間隔・最大5回"]
+    verify --> done["確認成功／確認不能を表示：結果を再書込しない"]
+    change["追加入力・移動・Esc・入力先変更"] -.-> discard
+```
+
+追加入力は観測世代を変え、移動・Esc・入力先変更は取消処理へ進む。原文確定後の読取待機中に
+入力があっても、手動用の待機キーへ入れず通常入力へ戻す。
+未確定原文を読めない特定のIMK報告形は観測を許容するが、**確定後の全文一致まで置換しない**。
+原文待機の0.5秒は期限付き、結果確認は試行数による制限で、UI遅延を含む厳密な0.5秒ではない。
+判定エラー・変換エラーは固定エラー表示へ進み、エラー解除を次の入力の必須条件にはしない。
+これらは実装上の方針であり、既知の短文不一致・長文読取不能・再開不能の解消を保証する図ではない。
+
+図と型の対応：手動の要求ID・待機キーは`InputSession`、通信・反映待ちは`ConversionLifecycle`、
+反映接続は`SumibiInputController.finishRequest`。自動の直列処理・世代検査は`AmbientConversionLifecycle`、
+認可は`DecisionsCoordinator`、原文確定・範囲置換は`AmbientResultApplier`と`InputEffectApplier`が担う。
+
 ## 5. 待機入力・Esc・救済
 
 この節の待機キーは手動変換の動作であり、Decisions自動変換中は入力を待ち行列へ蓄積しない。
@@ -112,10 +285,27 @@ Undoは入力先の標準編集履歴へ委ねる。原文の確定と範囲指�
 
 ## 8. 配布・検証の状態
 
+ビルド・配布は上記の実行時経路とは別。開発者がSwift Package＋`App/`資産からアプリを
+組み立て、配布スクリプトで署名・pkg化・Apple公証・チケット添付を行う。
+利用者の変換時にビルド・公証サーバーへ入力を送る経路はない。
+MacのIMK・AppKit・Keychain・UserDefaults・ServiceManagement・署名／公証はWindowsで再設計する境界。
+引き継ぐのは状態・非同期競合・認可・照合・保存分離の責務であり、Windows APIやプロセス構成は決めない。
+[Windows側の未決事項](WINDOWS_HANDOFF.md#8-windowsで改めて決めること)を参照。
+
 現行ビルドはSwift Packageから単一のSumibi.appを組み立てる。[App/build.sh](../App/build.sh)はインストールしない。利用者が選んだ導入範囲は**インストールしたユーザーのみ**、配置先は`~/Library/Input Methods/Sumibi.app`。全ユーザー用を並列の未決案として扱わない。
 
 配布用スクリプトは2026-10-17にPR #59でmainへ統合済み。0.4／build 4／arm64の検証用pkgは実Developer ID署名・Apple公証・チケット添付・Gatekeeper検査に成功したが、新規導入・更新・削除のpkg実機確認は未完了。開発署名による通常版の実機入替とも、0.9.0リリースの完成とも区別する。[配布資料](DIRECT_DISTRIBUTION.md)を参照。
 
-最新の実行記録は2026-10-20の#62ブランチで通常・開発各330件（329件成功・実60秒タイムアウト1件スキップ）。基準main単体の件数ではない。手動・Decisions・記号の利用者確認は[照合記録](IMPLEMENTATION_AUDIT.md)と[Tests/README](../Tests/README.md)を参照。模擬入力・特定アプリの合格を、未指定のアプリ・OS・Undo全経路へ一般化しない。
+最新の機能テスト実行記録は2026-10-20のPR #66で通常・開発各330件（329件成功・実60秒タイムアウト1件スキップ）。基準main単体の件数でも、今回の図追加での再実行でもない。手動・Decisions・記号の利用者確認は[照合記録](IMPLEMENTATION_AUDIT.md)と[Tests/README](../Tests/README.md)を参照。模擬入力・特定アプリの合格を、未指定のアプリ・OS・Undo全経路へ一般化しない。
 
 Chromium系入力欄の長文読取制限（#41）は未解消。1000文字制限とは別の入力先側の制約であり、今回の整理で長文変換が保証されるとは扱わない。Codex CLIなど未確認のTUIも検証済みに含めない。
+
+### Issue #64の図の検証
+
+2026-10-20、基準main `d2b96fc`の所有者・コントローラー・状態機械・各Coordinator・
+Lifecycle・InputClient・範囲照合／反映処理・保存先・HTTP要求生成・DiagnosticLogと図を照合した。
+本書の3図と所有関係資料の1図をMermaid 12.2.0＋Playwrightの一時的なheadless Chromeで
+構文解析・SVG描画し、画像で表示を確認した。関連5文書のローカルリンク／アンカーも検査する。
+GitHub固有のレンダラーでの表示確認や全対応OSの実機検証と同一視しない。
+文書だけの変更なので機能テスト・アプリの再ビルド／更新・実API通信は今回行っていない。
+検証ツールと生成したプレビューは作業用の一時領域だけに置き、製品の依存関係やバンドルへ追加しない。
