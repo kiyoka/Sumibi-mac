@@ -101,46 +101,6 @@ struct DecisionsSettingsView: View {
                         .font(.footnote).foregroundStyle(.secondary)
                     Button("費用を確認して判定回数をリセット") { resetting = true }
                 }
-                Section("一時デバッグ（確認後はオフにしてください）") {
-                    Toggle("原文・取得文字列を設定画面に表示", isOn: Binding(
-                        get: { InputRuntime.shared.ambient.debugTextEnabled },
-                        set: { InputRuntime.shared.ambient.setDebugTextEnabled($0) }))
-                    Text("閉じて短いテスト文を入力してください。失敗した変換の原文・期待する結果・置換前後の取得文字列を、このプロセスのメモリ上だけに保持します。取得範囲に別の文章が含まれる可能性があるため、機密情報は入力しないでください。ログ・設定・ファイルには保存しません。オフ・設定変更・次の適用試行・成功で文字列を消し、再起動後はオフになります。")
-                        .font(.footnote).foregroundStyle(.secondary)
-                    TimelineView(.periodic(from: .now, by: 1)) { _ in
-                        if InputRuntime.shared.ambient.debugTextEnabled,
-                           let report = InputRuntime.shared.ambient.lastCommitText {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("保持中の原文")
-                                Text(String(reflecting: report.source)).monospaced().textSelection(.enabled)
-                                Text("記録した範囲から取得した文字列")
-                                Text(report.atOriginal.map { String(reflecting: $0) } ?? "取得不可")
-                                    .monospaced().textSelection(.enabled)
-                                Text("確定後のカーソル直前から取得した文字列")
-                                Text(report.atCaret.map { String(reflecting: $0) } ?? "取得不可")
-                                    .monospaced().textSelection(.enabled)
-                            }.font(.footnote).privacySensitive()
-                        }
-                        if InputRuntime.shared.ambient.debugTextEnabled,
-                           let report = InputRuntime.shared.ambient.lastResultText {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("置換直後の確認（即時読み取り）")
-                                Text("期待する変換結果")
-                                Text(String(reflecting: report.expected)).monospaced().textSelection(.enabled)
-                                Text("結果追跡状態：\(report.stateMatches ? "一致" : "相違")")
-                                Text("確認した範囲（UTF-16）：\(report.range.map { AmbientRangeReport(marked: $0, selection: report.selection).markedDescription } ?? "未記録")")
-                                Text("置換後の選択（UTF-16）：\(AmbientRangeReport(marked: report.selection, selection: report.selection).selectionDescription)")
-                                Text("置換後の記録範囲から取得した文字列")
-                                Text(report.actual.map { String(reflecting: $0) } ?? "取得不可・確認未実行")
-                                    .monospaced().textSelection(.enabled)
-                                Text("置換後のカーソル直前の範囲（UTF-16）：\(report.caretRange.map { AmbientRangeReport(marked: $0, selection: report.selection).markedDescription } ?? "取得不可")")
-                                Text("置換後のカーソル直前から取得した文字列")
-                                Text(report.atCaret.map { String(reflecting: $0) } ?? "取得不可")
-                                    .monospaced().textSelection(.enabled)
-                            }.font(.footnote).privacySensitive()
-                        }
-                    }
-                }
                 if !model.statusMessage.isEmpty {
                     Section {
                         Text(model.statusMessage)

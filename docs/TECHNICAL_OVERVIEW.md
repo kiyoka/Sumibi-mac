@@ -5,7 +5,9 @@
 2026-10-20、Issue #64で図とコードを照合した実装の説明。
 基準mainは`d2b96fc2d2e7bf08a597e2ba46132712b6785d93`（PR #65まで）。
 記号サポートはPR #61でmainへ統合済み。原文比較・診断画面の独立化は
-[PR #66](https://github.com/kiyoka/Sumibi-mac/pull/66)（`fdf93bf`、確認時点で未マージ）として区別する。
+[PR #66](https://github.com/kiyoka/Sumibi-mac/pull/66)として区別する。
+2026-10-31、PR #67の図を保持したままPR #66へmainを取り込み、画面の説明を追従させた。
+以下の図は元の基準mainを表し、PR #66による変更点は注記で示す。
 今回は文書の更新であり、機能・保存形式・製品仕様を変更しない。
 
 [SPEC](SPEC.md)は合意した要件であり、全機能の実装完了を意味しない。本書では「実装済み」「未実装の要件」「観測・実機確認」「将来案」を分ける。仕様とコードの差、参照したコード・テストは[実装照合記録](IMPLEMENTATION_AUDIT.md)に記載する。以前の設計案と詳しいアプリ別の調査は[旧技術解説](TECHNICAL_OVERVIEW_HISTORY.md)・[Issue #4の調査記録](ISSUE_4_PROTOTYPE.md)へ保存した。

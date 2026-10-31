@@ -9,6 +9,7 @@ struct APISettingsView: View {
     @State private var isShowingDeletionConfirmation = false
     @State private var isShowingDecisionsSettings = false
     @State private var isShowingMozcLicense = false
+    @State private var isShowingDiagnostics = false
     @FocusState private var focusedField: Field?
 
     private enum Field { case endpoint, modelName, apiKey }
@@ -113,6 +114,12 @@ struct APISettingsView: View {
                 Button("記号データ（Mozc）のライセンス…") { isShowingMozcLicense = true }
             }
 
+            Section("診断") {
+                Button("診断・デバッグ…") { isShowingDiagnostics = true }
+                Text("変換や入力先の不具合を調べるための一時表示です。自動変換の有効化は不要です。原文を表示する場合は、診断画面で明示的にオンにしてください。")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+
             Section {
                 HStack {
                     Button("設定を保存") {
@@ -148,6 +155,7 @@ struct APISettingsView: View {
         }
         .sheet(isPresented: $isShowingDecisionsSettings) { DecisionsSettingsView() }
         .sheet(isPresented: $isShowingMozcLicense) { MozcLicenseView() }
+        .sheet(isPresented: $isShowingDiagnostics) { DiagnosticsSettingsView() }
         .confirmationDialog("保存したAPIキーを削除しますか？",
                             isPresented: $isShowingDeletionConfirmation,
                             titleVisibility: .visible) {

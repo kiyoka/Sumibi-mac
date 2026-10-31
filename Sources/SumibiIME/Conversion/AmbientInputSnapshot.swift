@@ -20,6 +20,15 @@ struct AmbientSourceReadReport: Equatable {
     var returnedDescription: String { returnedLength.map { "\($0)" } ?? "取得不可" }
 }
 
+/// Opt-in UI only. Not Codable, logged, or sent; uses the existing exact-range read.
+struct AmbientObservationTextReport: Equatable {
+    enum Stage: String { case capture = "判定前の原文照合", validation = "処理中の原文再照合" }
+    let stage: Stage
+    let source: String
+    let actual: String?
+    let ranges: AmbientRangeReport
+}
+
 /// Fixed diagnostic text only: never includes input, application names or ranges.
 enum AmbientObservationBlock: String, Error, CaseIterable {
     case queueFull = "自動判定の待機が多いため停止しました。手動変換を使うか、入力を区切ってください。"
@@ -70,7 +79,8 @@ struct AmbientInputSnapshot: Equatable {
                         allowUnreadableComposition: Bool = false,
                         onRanges: ((AmbientRangeReport) -> Void)? = nil,
                         onSelectionMismatch: ((NSRange, NSRange) -> Void)? = nil,
-                        onSourceRead: ((AmbientRangeReport, Int?) -> Void)? = nil) -> Result<Self, AmbientObservationBlock> {
+                        onSourceRead: ((AmbientRangeReport, Int?) -> Void)? = nil,
+                        onSourceText: ((AmbientObservationTextReport) -> Void)? = nil) -> Result<Self, AmbientObservationBlock> {
         let marked = input.markedRange()
         let selection = input.selectedRange()
         onRanges?(AmbientRangeReport(marked: marked, selection: selection))
@@ -92,8 +102,16 @@ struct AmbientInputSnapshot: Equatable {
         let actual = input.attributedSubstring(from: marked)?.string
         onSourceRead?(AmbientRangeReport(marked: marked, selection: selection), actual?.utf16.count)
         if let actual {
-            guard actual == source else { return .failure(.sourceMismatch) }
-        } else if !allowUnreadableComposition { return .failure(.sourceUnavailable) }
+            guard actual == source else {
+                onSourceText?(.init(stage: .capture, source: source, actual: actual,
+                    ranges: AmbientRangeReport(marked: marked, selection: selection)))
+                return .failure(.sourceMismatch)
+            }
+        } else if !allowUnreadableComposition {
+            onSourceText?(.init(stage: .capture, source: source, actual: nil,
+                ranges: AmbientRangeReport(marked: marked, selection: selection)))
+            return .failure(.sourceUnavailable)
+        }
         return .success(Self(source: source, marked: marked, selection: selection,
                              requiresCommittedValidation: actual == nil))
     }
@@ -103,11 +121,18 @@ struct AmbientInputSnapshot: Equatable {
     }
 
     func validationFailure(in input: any InputClient,
-                           onSourceRead: ((Int?) -> Void)? = nil) -> AmbientObservationBlock? {
+                           onSourceRead: ((Int?) -> Void)? = nil,
+                           onSourceText: ((AmbientObservationTextReport) -> Void)? = nil) -> AmbientObservationBlock? {
         guard input.markedRange() == marked, input.selectedRange() == selection else { return .targetChanged }
         let actual = input.attributedSubstring(from: marked)?.string
         onSourceRead?(actual?.utf16.count)
-        if let actual { return actual == source ? nil : .sourceMismatch }
-        return requiresCommittedValidation ? nil : .sourceUnavailable
+        let failure: AmbientObservationBlock? = if let actual {
+            actual == source ? nil : .sourceMismatch
+        } else { requiresCommittedValidation ? nil : .sourceUnavailable }
+        if failure != nil {
+            onSourceText?(.init(stage: .validation, source: source, actual: actual,
+                ranges: AmbientRangeReport(marked: marked, selection: selection)))
+        }
+        return failure
     }
 }
