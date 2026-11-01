@@ -45,6 +45,7 @@ enum DiagnosticEvent: String, CaseIterable {
     case overLimit
     case decisionsStarted, decisionsJudged, decisionsDiscarded, decisionsApplied, decisionsFailed
     case committedSourceWaiting, committedSourceRetried, committedSourceConfirmed
+    case sourceCommitted, commitAlreadyPresent, replacementWritten
 
     var isFailure: Bool {
         switch self {

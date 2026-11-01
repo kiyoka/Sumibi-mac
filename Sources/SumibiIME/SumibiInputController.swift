@@ -216,7 +216,11 @@ final class SumibiInputController: IMKInputController {
         // 確定直後にも未確定文字列なしで呼ばれる。そのとき直前の変換結果と置換位置を消すと、2回目の変換ができなくなる。
         guard !state.marked.isEmpty, !runtime.originalCommitted else { return }
         runtime.ambient.stop()
-        input.insertText(state.marked, replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
+        if runtime.isMarkedTextAlreadyCommitted(state.marked, in: IMKInputClient(input)) {
+            DiagnosticLog.record(.commitAlreadyPresent, counters: [runtime.lastMarkedStart ?? -1, state.marked.utf16.count])
+        } else {
+            input.insertText(state.marked, replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
+        }
         cancelForTargetChange(rescueMarked: false)
     }
 
@@ -239,7 +243,11 @@ final class SumibiInputController: IMKInputController {
             return
         }
         if let input = sender as? IMKTextInput, !state.marked.isEmpty, !runtime.originalCommitted {
-            input.insertText(state.marked, replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
+            if runtime.isMarkedTextAlreadyCommitted(state.marked, in: IMKInputClient(input)) {
+                DiagnosticLog.record(.commitAlreadyPresent, counters: [runtime.lastMarkedStart ?? -1, state.marked.utf16.count])
+            } else {
+                input.insertText(state.marked, replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
+            }
             cancelForTargetChange(rescueMarked: false)
         } else {
             cancelForTargetChange()
@@ -357,6 +365,22 @@ final class SumibiInputController: IMKInputController {
             }
             return
         }
+        if request.kind == .first, runtime.originalCommitted {
+            let marked = input.markedRange()
+            if marked.location != NSNotFound, marked.length > 0 {
+                let shouldRetry = runtime.conversion.recordUnavailableClient()
+                DiagnosticLog.record(.deliveryRetried, counters: [runtime.conversion.retryCount, marked.location, marked.length])
+                if !shouldRetry {
+                    DiagnosticLog.record(.deliveryUnavailable)
+                    runtime.feedback.report(.delivery(.rangeUnavailable, stage: .targetValidation,
+                        sourceCharacters: request.source.count, sourceUTF16: request.source.utf16.count))
+                    cancelForTargetChange()
+                } else {
+                    scheduleFinish(id: number.intValue, delay: 0.25, retry: true)
+                }
+                return
+            }
+        }
         let selection = input.selectedRange()
         DiagnosticLog.record(.deliveryRangeChecked, counters: [selection.location, selection.length])
         if let failure = runtime.replacement.resolvePendingTarget(request, in: ReplacementInput(input)) {
@@ -371,6 +395,12 @@ final class SumibiInputController: IMKInputController {
             return
         }
         guard let outcome = runtime.conversion.takeOutcome(id: request.id) else { return }
+        if runtime.ambient.debugTextEnabled, request.kind == .first {
+            let originalRange = anchor?.range ?? NSRange(location: NSNotFound, length: request.source.utf16.count)
+            runtime.ambient.recordCommitReport(AmbientCommitReport(source: request.source,
+                originalRange: originalRange, input: IMKInputClient(input),
+                captureText: { [runtime] in runtime.ambient.recordCommitText($0) }))
+        }
         pendingTarget = nil
         let effects: [SessionEffect]
         switch request.kind {
@@ -390,6 +420,7 @@ final class SumibiInputController: IMKInputController {
                     let range = a.range
                     input.setMarkedText(MarkedTextStyle.attributed(request.source), selectionRange: NSRange(location: request.source.utf16.count, length: 0),
                                         replacementRange: range)
+                    runtime.lastMarkedStart = range.location
                     anchor = nil
                 }
             }
@@ -426,7 +457,8 @@ final class SumibiInputController: IMKInputController {
            runtime.state.pending == nil, runtime.state.previous?.result == text {
             let verification = AmbientResultVerification(expected: text,
                 range: NSRange(location: range.location, length: text.utf16.count),
-                selectionAtWrite: input.selectedRange())
+                selectionAtWrite: input.selectedRange(),
+                sourceUTF16: request.source.utf16.count)
             let route = ObjectIdentifier(input as AnyObject)
             let processID = NSWorkspace.shared.frontmostApplication?.processIdentifier
             let activity = Self.inputCounts()
@@ -441,7 +473,8 @@ final class SumibiInputController: IMKInputController {
                     guard !controller.isExcluded(current),
                           ObjectIdentifier(current as AnyObject) == route,
                           verification.isCurrent(runtime: runtime, input: IMKInputClient(current)) else { return nil }
-                    return verification.readback(IMKInputClient(current))
+                    return verification.readback(IMKInputClient(current),
+                        captureText: runtime.ambient.debugTextEnabled ? { runtime.ambient.recordResultText($0) } : nil)
                 })
         }
     }

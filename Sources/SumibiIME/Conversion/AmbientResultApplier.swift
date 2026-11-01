@@ -69,6 +69,13 @@ struct AmbientResultApplier {
                     input: input, captureText: onCommitTextReport)
                 onCommitReport?(report)
             }
+            let postMarked = input.markedRange()
+            if postMarked.location != NSNotFound, postMarked.length > 0 {
+                if deferSource(request) { return }
+                _ = fail(.committedTargetMismatch)
+                runtime.cancelForTargetChange(rescueMarked: false)
+                return
+            }
             if snapshot.reportsRelativeEndCaret, input.selectedRange() == snapshot.selection {
                 // A still-relative post-commit caret must never anchor at document offset
                 // `source.count`. Read the exact recorded composition range, not a search
@@ -135,7 +142,7 @@ struct AmbientResultApplier {
                 // Do not write again or clear successful conversion state while the
                 // client is still exposing its pre-replacement text.
                 onDeferredVerification(AmbientResultVerification(expected: first, range: anchor.range,
-                    selectionAtWrite: input.selectedRange()))
+                    selectionAtWrite: input.selectedRange(), sourceUTF16: source.utf16.count))
                 return false
             }
             runtime.cancelForTargetChange(rescueMarked: false)
@@ -228,7 +235,7 @@ struct AmbientResultApplier {
         if stateMatches, range != nil, actual == first { return .applied }
         if written, stateMatches, let range, let onDeferredVerification {
             onDeferredVerification(AmbientResultVerification(expected: first, range: range,
-                selectionAtWrite: input.selectedRange()))
+                selectionAtWrite: input.selectedRange(), sourceUTF16: source.utf16.count))
             return .verifyingResult
         }
         runtime.cancelForTargetChange(rescueMarked: false)
@@ -312,17 +319,27 @@ struct AmbientResultVerification {
     let expected: String
     let range: NSRange
     let selectionAtWrite: NSRange
+    let sourceUTF16: Int
+
+    init(expected: String, range: NSRange, selectionAtWrite: NSRange, sourceUTF16: Int = 0) {
+        self.expected = expected
+        self.range = range
+        self.selectionAtWrite = selectionAtWrite
+        self.sourceUTF16 = sourceUTF16
+    }
 
     func isCurrent(runtime: InputRuntime, input: any InputClient) -> Bool {
         let selection = input.selectedRange()
         let marked = input.markedRange()
+        let expectedCaret = NSRange(location: range.location + range.length, length: 0)
+        let appendedCaret = sourceUTF16 > 0 ? NSRange(location: range.location + sourceUTF16 + range.length, length: 0) : NSRange(location: NSNotFound, length: 0)
         return runtime.state.pending == nil && runtime.state.marked.isEmpty
             && !runtime.candidates.shouldBeVisible && runtime.state.previous?.result == expected
             && runtime.replacement.anchor?.text == expected && runtime.replacement.anchor?.range == range
             && (marked.location == NSNotFound || marked.length == 0)
             && selection.location != NSNotFound
             && (selection == selectionAtWrite || selection == range
-                || selection == NSRange(location: range.location + range.length, length: 0))
+                || selection == expectedCaret || selection == appendedCaret)
     }
 
     func matches(_ input: any InputClient,

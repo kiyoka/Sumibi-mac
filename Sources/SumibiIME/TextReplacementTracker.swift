@@ -61,7 +61,10 @@ final class TextReplacementTracker {
               target.requestID == request.id,
               target.kind == request.kind else { return false }
         // いずれの要求も、記録した位置(アンカー)に記録した文字列がまだあることを確かめてから置換する。
-        let ok = target.selection == input.selectedRange() && validatesAnchor(in: input, expected: target.expectedText)
+        let currentSelection = input.selectedRange()
+        let selectionMatches = target.selection == currentSelection
+            || (anchor != nil && target.selection == anchor?.range && currentSelection == NSRange(location: anchor!.end, length: 0))
+        let ok = selectionMatches && validatesAnchor(in: input, expected: target.expectedText)
         DiagnosticLog.record(.targetValidated)
         return ok
     }
@@ -81,7 +84,10 @@ final class TextReplacementTracker {
     func pendingFailure(_ request: PendingRequest, in input: ReplacementInput) -> ReplacementValidationFailure {
         guard let target = pendingTarget else { return .trackingUnavailable }
         guard target.requestID == request.id, target.kind == request.kind else { return .requestChanged }
-        guard target.selection == input.selectedRange() else { return .selectionChanged }
+        let currentSelection = input.selectedRange()
+        let selectionMatches = target.selection == currentSelection
+            || (anchor != nil && target.selection == anchor?.range && currentSelection == NSRange(location: anchor!.end, length: 0))
+        guard selectionMatches else { return .selectionChanged }
         return anchorFailure(in: input, expected: target.expectedText)
     }
 
@@ -99,6 +105,14 @@ final class TextReplacementTracker {
         return .sourceMismatch
     }
 
+    private func hasDuplicatedSourceAfterAnchor(_ anchor: ReplacementAnchor, selection: NSRange, in input: ReplacementInput) -> Bool {
+        guard anchor.span == anchor.text.utf16.count, anchor.span > 0, anchor.end >= anchor.span else { return false }
+        guard selection.length == 0, selection.location == anchor.end + anchor.span else { return false }
+        let duplicateRange = NSRange(location: anchor.end, length: anchor.span)
+        guard input.attributedSubstring(from: duplicateRange)?.string == anchor.text else { return false }
+        return input.attributedSubstring(from: anchor.range)?.string == anchor.text
+    }
+
     /// ターミナルは書き込んだ文字を少し遅れて反映し、書き込んだ直後のカーソル位置は原文の手前のままになる。
     /// 応答時のカーソルが記録より原文の長さだけ後ろにあり、その直前に原文があれば、書き込みが反映されたものとして位置を改める。
     func reanchorIfCaretLagged(_ request: PendingRequest, in input: ReplacementInput) {
@@ -106,6 +120,11 @@ final class TextReplacementTracker {
               let anchor, anchor.text == target.expectedText, anchor.end == target.selection.location else { return }
         let length = anchor.text.utf16.count
         let selection = input.selectedRange()
+        if hasDuplicatedSourceAfterAnchor(anchor, selection: selection, in: input) {
+            self.anchor = nil
+            DiagnosticLog.record(.reanchorUnavailable)
+            return
+        }
         guard selection.length == 0, selection.location == anchor.end + length,
               input.attributedSubstring(from: NSRange(location: anchor.end, length: length))?.string == anchor.text else { return }
         DiagnosticLog.record(.targetReanchored)
@@ -121,6 +140,11 @@ final class TextReplacementTracker {
         guard let target = pendingTarget, target.requestID == request.id, target.kind == request.kind,
               let anchor, anchor.text == target.expectedText else { return }
         let selection = input.selectedRange()
+        if hasDuplicatedSourceAfterAnchor(anchor, selection: selection, in: input) {
+            self.anchor = nil
+            DiagnosticLog.record(.reanchorUnavailable)
+            return
+        }
         guard selection.location != NSNotFound, selection.length == 0,
               let span = wrappedSpan(of: anchor.text, endingAt: selection.location, in: input)
         else {
@@ -170,6 +194,9 @@ final class TextReplacementTracker {
         if anchorMatches(in: input, expected: expected) { return true }
         guard let anchor, anchor.text == expected else { return false }
         let selection = input.selectedRange()
+        if hasDuplicatedSourceAfterAnchor(anchor, selection: selection, in: input) {
+            return false
+        }
         guard selection.location != NSNotFound, selection.length == 0,
               let span = wrappedSpan(of: anchor.text, endingAt: selection.location, in: input) else { return false }
         DiagnosticLog.record(.targetReanchored)

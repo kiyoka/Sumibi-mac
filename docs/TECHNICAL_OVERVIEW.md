@@ -143,7 +143,7 @@ Runtimeは状態機械・範囲追跡・通信・候補表示と、最新コン�
 
 [SumibiInputController](../Sources/SumibiIME/SumibiInputController.swift)の`deactivateServer`は、消費したキーから0.3秒未満の終了通知を短い再生成として扱う。それ以外では、必要に応じて未確定原文を確定し、`cancelForTargetChange`で要求・待機キー・直前の候補対象・アンカーを解除する。対象外アプリへ移った場合も同じ取消経路を使う。この時間判定は観測に基づく実装上の対処であり、OSが完全に入力先変更を識別してくれる保証ではない。
 
-応答の要求IDと、入力先から読んだ範囲・選択位置・原文を照合し、不一致・読取不能なら置換しない。遅延したカーソル位置や折り返しを補正する場合も、[TextReplacementTracker](../Sources/SumibiIME/TextReplacementTracker.swift)と[WrappedText](../Sources/SumibiCore/WrappedText.swift)で対象を検証する。別アプリ・同じ原文を含む別入力欄・異なるOSでの全経路の安全性を、この照合だけで実機検証済みとは扱わない。
+応答の要求IDと、入力先から読んだ範囲・選択位置・原文を照合し、不一致・読取不能なら置換しない。遅延したカーソル位置や折り返しを補正する場合も、[TextReplacementTracker](../Sources/SumibiIME/TextReplacementTracker.swift)と[WrappedText](../Sources/SumibiCore/WrappedText.swift)で対象を検証する。アンカー直後に原文が重複して挿入されている場合（Web入力欄での二重確定など）は再アンカーを拒否し、置換対象を失効させて重複後半部分の誤置換を防止する。また入力先が未確定文字列（`markedRange`）を露出したままの状態では置換書き込みを拒否する。別アプリ・同じ原文を含む別入力欄・異なるOSでの全経路の安全性を、この照合だけで実機検証済みとは扱わない。
 
 ## 4. 入力・初回変換・非同期応答（実装済み）
 
@@ -154,10 +154,10 @@ Runtimeは状態機械・範囲追跡・通信・候補表示と、最新コン�
 初回変換は以下の順序で行う。
 
 1. 状態機械が原文を保持して要求IDを発行する。
-2. [InputEffectApplier](../Sources/SumibiIME/InputEffectApplier.swift)が原文を通常文字として確定し、置換範囲を記録する。未確定のまま送信する方式ではない。
+2. [InputEffectApplier](../Sources/SumibiIME/InputEffectApplier.swift)が原文を通常文字として確定し、置換範囲を記録する。コントローラー再作成やDOM更新で入力先がすでに未確定文字列を確定している場合（`lastMarkedStart`位置に同一文字列が存在し未確定範囲が終了している場合）は二重挿入をスキップする。また再入による二重確定を防ぐため、挿入呼び出し前に確定フラグを立てる。未確定のまま送信する方式ではない。
 3. 保存済みユーザー辞書を付け、[ConversionCoordinator](../Sources/SumibiIME/Conversion/ConversionCoordinator.swift)が文字数・送信先・APIキー・送信同意を確認する。
 4. [OpenAICompatibleClient](../Sources/SumibiCore/OpenAICompatibleClient.swift)がURLSessionで非同期通信する。応答保存はMainActorへ戻す。
-5. 要求IDと入力先の対象を照合し、成功なら原文の範囲を結果で置換する。失敗なら原文を残して待機入力の処理を再開する。
+5. 要求IDと入力先の対象を照合し、成功なら原文の範囲を結果で置換する。置換後も[AmbientResultVerification](../Sources/SumibiIME/Conversion/AmbientResultApplier.swift)と[ConversionResultVerifier](../Sources/SumibiIME/Conversion/ConversionResultVerifier.swift)により入力先の反映結果を検証する。万一入力先が置換ではなく末尾追記した場合（カーソルが原文＋結果分進んだ場合）も検証を沈黙中断せず不一致（`.mismatch`）として検出・通知する。失敗なら原文を残して待機入力の処理を再開する。
 
 [ConversionLifecycle](../Sources/SumibiIME/Conversion/ConversionLifecycle.swift)は一つの通信タスク、応答、反映待ちタイマーを所有する。入力先が一時的に無効なら0.25秒間隔で最大240回、応答の**反映先**を探す。これはAPIの再送ではない。照合後に応答を一度だけ取り出し、待機キーが次の要求を始める前に旧タスク・タイマーを解除する。通信のタイムアウト設定は60秒で、反映待ちの上限とは別である。
 
