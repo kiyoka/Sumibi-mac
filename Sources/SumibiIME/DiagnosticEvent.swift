@@ -49,6 +49,7 @@ enum DiagnosticEvent: String, CaseIterable {
     case deferredChromeCommitStarted, deferredChromeCommitUnavailable
     case slidesDirectShortcut, slidesDirectTargetRejected
     case deferredChromeCommitSnapshotRejected
+    case slidesOffsetOneSourceRead
     case deferredChromeCommitCancelled, deferredChromeCommitSubmitted
 
     var isFailure: Bool {
