@@ -110,7 +110,7 @@ struct AmbientInputSnapshot: Equatable {
         // This opt-in is for committing the existing composition as a unit.
         // It never authorizes a write to the zero-based range.
         if allowVerifiedRelativeComposition, looksLikeRelativeEnd, marked.location > 0,
-           (actual?.utf16.count ?? 0) < marked.length {
+           actual != source, (actual?.utf16.count ?? 0) <= marked.length {
             let relative = NSRange(location: 0, length: marked.length)
             if input.attributedSubstring(from: relative)?.string == source {
                 sourceReadRange = relative

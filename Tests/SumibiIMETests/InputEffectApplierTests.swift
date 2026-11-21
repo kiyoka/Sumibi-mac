@@ -76,6 +76,24 @@ final class InputEffectApplierTests: XCTestCase {
         XCTAssertFalse(snapshot.matches(input))
     }
 
+    func testSlidesRetriesSameLengthMismatchOnlyWithExactZeroBasedSource() throws {
+        let runtime = isolatedRuntime()
+        let input = RecordingInputClient()
+        _ = applier(runtime).apply(runtime.state.receive(.text("ohayou")), to: input)
+        input.text = "ohayou!"
+        input.reportedMarkedOffset = 1
+        input.reportsRelativeMarkedCaret = true
+        XCTAssertEqual(input.attributedSubstring(from: input.markedRange())?.string, "hayou!")
+        XCTAssertNil(AmbientInputSnapshot(source: "ohayou", input: input, allowUnreadableComposition: true))
+        let snapshot = try AmbientInputSnapshot.capture(source: "ohayou", input: input,
+            allowVerifiedRelativeComposition: true).get()
+        XCTAssertTrue(snapshot.matches(input))
+        input.text = "xhayou!"
+        XCTAssertFalse(snapshot.matches(input))
+        XCTAssertThrowsError(try AmbientInputSnapshot.capture(source: "ohayou", input: input,
+            allowVerifiedRelativeComposition: true).get())
+    }
+
     func testSlidesDirectConversionRecognizesOnlyGoogleSlidesEditPages() throws {
         for value in ["https://docs.google.com/presentation/d/example/edit#slide=id.p"] {
             XCTAssertTrue(ChromeSlidesEditingTarget.isSlidesEditPage(try XCTUnwrap(URL(string: value))))
