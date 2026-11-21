@@ -27,6 +27,8 @@ final class InputRuntime {
     var selectionRange: NSRange?
     var originalCommitted = false
     var lastMarkedStart: Int?
+    var deferredChromeCommit: (id: Int, snapshot: AmbientInputSnapshot, client: AnyObject,
+                               editingTarget: ChromeSlidesEditingTarget, activity: [UInt32])?
     /// A committed-source read wait, not a manual request whose keys may be queued.
     var awaitingAmbientSourceID: Int?
     var commandTapTimer: DispatchSourceTimer?
@@ -64,6 +66,7 @@ final class InputRuntime {
 
     /// Shared cancellation path used by the IMK adapter and fake-client regression tests.
     func cancelComposition() -> [SessionEffect] {
+        deferredChromeCommit = nil
         lastMarkedStart = nil
         awaitingAmbientSourceID = nil
         resultVerifier.cancel()
@@ -80,6 +83,7 @@ final class InputRuntime {
     }
 
     func cancelForTargetChange(rescueMarked: Bool = true) {
+        deferredChromeCommit = nil
         lastMarkedStart = nil
         awaitingAmbientSourceID = nil
         resultVerifier.cancel()

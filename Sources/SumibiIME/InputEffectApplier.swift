@@ -12,6 +12,7 @@ struct InputEffectApplier {
     let selectCandidate: (Int) -> Void
     var onReplacementWritten: ((NSRange, String) -> Void)? = nil
     var onReplacementRejected: ((ReplacementValidationFailure) -> Void)? = nil
+    var retainsComposition: ((Int, String) -> Bool)? = nil
     private var state: InputSession { runtime.state }
 
     func apply(_ effects: [SessionEffect], to input: any InputClient) -> Bool {
@@ -53,6 +54,16 @@ struct InputEffectApplier {
             case .passCancel:
                 passToClient = true
             case .startFirst(let id, let source):
+                if let retainsComposition {
+                    guard retainsComposition(id, source) else {
+                        // The explicit mode could not identify the active composition.
+                        // Keep it marked and leave the network untouched.
+                        _ = state.completeFirst(id: id, result: nil)
+                        return true
+                    }
+                    startConversion(id, ConversionRequest(source: source))
+                    continue
+                }
                 // 原文をいったん通常の文字として確定し、応答が来たらその範囲を置換する。
                 // 未確定のままだと原文が入力先のUndo履歴に入らず、Undoで原文へ戻せない。
                 let preMarked = input.markedRange()

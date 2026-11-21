@@ -54,6 +54,7 @@ struct AmbientInputSnapshot: Equatable {
     let marked: NSRange
     let selection: NSRange
     let requiresCommittedValidation: Bool
+    private let sourceReadRange: NSRange
 
     /// Observed Codex shape: marked (22,13), selection (13,0). Only accept a relative
     /// end caret when it lies before the marked range, not an ambiguous caret inside it.
@@ -68,15 +69,18 @@ struct AmbientInputSnapshot: Equatable {
         self = snapshot
     }
 
-    private init(source: String, marked: NSRange, selection: NSRange, requiresCommittedValidation: Bool) {
+    private init(source: String, marked: NSRange, selection: NSRange, sourceReadRange: NSRange,
+                 requiresCommittedValidation: Bool) {
         self.source = source
         self.marked = marked
         self.selection = selection
+        self.sourceReadRange = sourceReadRange
         self.requiresCommittedValidation = requiresCommittedValidation
     }
 
     static func capture(source: String, input: any InputClient,
                         allowUnreadableComposition: Bool = false,
+                        allowVerifiedRelativeComposition: Bool = false,
                         onRanges: ((AmbientRangeReport) -> Void)? = nil,
                         onSelectionMismatch: ((NSRange, NSRange) -> Void)? = nil,
                         onSourceRead: ((AmbientRangeReport, Int?) -> Void)? = nil,
@@ -88,18 +92,41 @@ struct AmbientInputSnapshot: Equatable {
         guard marked.location != NSNotFound, marked.location >= 0, marked.length >= 0,
               marked.location <= Int.max - marked.length else { return .failure(.markedUnavailable) }
         guard marked.length == source.utf16.count else { return .failure(.markedLengthMismatch) }
-        // Accept exact known composition reports, not arbitrary selection. Keep the raw
-        // ranges unchanged for all subsequent checks; never compare a normalized caret
-        // with an unrelated range or silently accept an interior absolute caret.
+        // Keep raw ranges for later comparison. Only the explicitly requested manual
+        // experiment can consider a relative end that overlaps the marked range.
         let endCaret = selection.length == 0 && selection.location == marked.location + marked.length
         let wholeComposition = selection == marked
-        let relativeEnd = selection.length == 0 && selection.location == marked.length
-            && selection.location < marked.location
-        guard endCaret || wholeComposition || relativeEnd else {
+        let looksLikeRelativeEnd = selection.length == 0 && selection.location == marked.length
+        let relativeEnd = looksLikeRelativeEnd && selection.location < marked.location
+        let needsExactRead = !endCaret && !wholeComposition && !relativeEnd
+        let offsetOneEnd = allowVerifiedRelativeComposition && needsExactRead
+            && selection.length == 0 && selection.location != NSNotFound
+            && selection.location > 0 && selection.location - 1 == marked.length
+        guard !needsExactRead || offsetOneEnd || (allowVerifiedRelativeComposition && looksLikeRelativeEnd) else {
             onSelectionMismatch?(marked, selection)
             return .failure(.selectionMismatch)
         }
-        let actual = input.attributedSubstring(from: marked)?.string
+        // Slides may expose a one-unit prefix in its temporary input buffer.
+        // Preserve the reported coordinates and re-read the verified range before commit.
+        var sourceReadRange = offsetOneEnd ? NSRange(location: 1, length: marked.length) : marked
+        var actual = input.attributedSubstring(from: sourceReadRange)?.string
+        if offsetOneEnd {
+            DiagnosticLog.record(.slidesOffsetOneSourceRead, counters: [
+                marked.length, actual?.utf16.count ?? -1, actual == source ? 1 : 0
+            ])
+        }
+        // Chrome can report a marked range in document coordinates and expose
+        // the active composition in a separate, zero-based input buffer.
+        // This opt-in is for committing the existing composition as a unit.
+        // It never authorizes a write to the zero-based range.
+        if allowVerifiedRelativeComposition, looksLikeRelativeEnd, marked.location > 0,
+           actual != source, (actual?.utf16.count ?? 0) <= marked.length {
+            let relative = NSRange(location: 0, length: marked.length)
+            if input.attributedSubstring(from: relative)?.string == source {
+                sourceReadRange = relative
+                actual = source
+            }
+        }
         onSourceRead?(AmbientRangeReport(marked: marked, selection: selection), actual?.utf16.count)
         if let actual {
             guard actual == source else {
@@ -107,12 +134,12 @@ struct AmbientInputSnapshot: Equatable {
                     ranges: AmbientRangeReport(marked: marked, selection: selection)))
                 return .failure(.sourceMismatch)
             }
-        } else if !allowUnreadableComposition {
+        } else if !allowUnreadableComposition || needsExactRead {
             onSourceText?(.init(stage: .capture, source: source, actual: nil,
                 ranges: AmbientRangeReport(marked: marked, selection: selection)))
             return .failure(.sourceUnavailable)
         }
-        return .success(Self(source: source, marked: marked, selection: selection,
+        return .success(Self(source: source, marked: marked, selection: selection, sourceReadRange: sourceReadRange,
                              requiresCommittedValidation: actual == nil))
     }
 
@@ -124,7 +151,7 @@ struct AmbientInputSnapshot: Equatable {
                            onSourceRead: ((Int?) -> Void)? = nil,
                            onSourceText: ((AmbientObservationTextReport) -> Void)? = nil) -> AmbientObservationBlock? {
         guard input.markedRange() == marked, input.selectedRange() == selection else { return .targetChanged }
-        let actual = input.attributedSubstring(from: marked)?.string
+        let actual = input.attributedSubstring(from: sourceReadRange)?.string
         onSourceRead?(actual?.utf16.count)
         let failure: AmbientObservationBlock? = if let actual {
             actual == source ? nil : .sourceMismatch

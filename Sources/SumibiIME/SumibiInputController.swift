@@ -60,11 +60,52 @@ final class SumibiInputController: IMKInputController {
             return false
         }
         guard event.type == .keyDown, let input = sender as? IMKTextInput else { return false }
+        let isControlJ = event.modifierFlags.intersection([.shift, .command, .control, .option, .function])
+            == .control && event.charactersIgnoringModifiers?.lowercased() == "j"
+        if isControlJ, input.bundleIdentifier() == ChromeSlidesEditingTarget.chromeBundleID,
+           SettingsStore().slidesDirectConversionEnabled {
+            DiagnosticLog.record(.slidesDirectShortcut, counters: [
+                state.marked.utf16.count, state.pending == nil ? 0 : 1,
+                runtime.candidates.shouldBeVisible ? 1 : 0
+            ])
+            if !state.marked.isEmpty, state.pending == nil, !runtime.candidates.shouldBeVisible,
+               let chrome = NSWorkspace.shared.frontmostApplication,
+               chrome.bundleIdentifier == ChromeSlidesEditingTarget.chromeBundleID {
+                convertAfterChromeKeyDown(event.keyCode, input: input, processID: chrome.processIdentifier)
+                return true
+            }
+        }
         return process(decode(event), keyCode: event.keyCode, in: input)
     }
 
+    private func convertAfterChromeKeyDown(_ keyCode: UInt16, input: IMKTextInput, processID: pid_t) {
+        let source = state.marked
+        let activity = Self.inputCounts()
+        runtime.cancelAmbientSourceWaitForInput()
+        runtime.resultVerifier.cancel()
+        runtime.ambient.stop()
+        runtime.lastConsumedAt = Date()
+        // Let IMK finish returning the key event before querying Chrome off the main thread.
+        DispatchQueue.main.async { [self] in
+            func stillCurrent() -> Bool {
+                !IsSecureEventInputEnabled() && runtime.lastHandler === self
+                    && state.pending == nil && state.marked == source
+                    && !runtime.candidates.shouldBeVisible && Self.inputCounts() == activity
+                    && NSWorkspace.shared.frontmostApplication?.processIdentifier == processID
+            }
+            guard stillCurrent() else { return }
+            ChromeSlidesEditingTarget.capture(process: processID) { slidesTarget in
+                guard stillCurrent(),
+                      let liveClient = self.liveInput(), (liveClient as AnyObject) === (input as AnyObject) else { return }
+                _ = self.process(.convert, keyCode: keyCode, in: liveClient,
+                                 slidesTarget: SettingsStore().slidesDirectConversionEnabled ? slidesTarget : nil)
+            }
+        }
+    }
+
     /// 解釈したキーを処理する。右Commandのタップは、キーコードなしの`Control + J`としてここへ来る。
-    private func process(_ decoded: InputKey?, keyCode: UInt16?, in input: IMKTextInput) -> Bool {
+    private func process(_ decoded: InputKey?, keyCode: UInt16?, in input: IMKTextInput,
+                         slidesTarget: ChromeSlidesEditingTarget? = nil) -> Bool {
         runtime.cancelAmbientSourceWaitForInput()
         runtime.resultVerifier.cancel()
         runtime.lastInput = input
@@ -166,9 +207,9 @@ final class SumibiInputController: IMKInputController {
         let wasPending = state.pending != nil
         let effects = state.receive(key, canReplacePrevious: validatesPrevious(in: input))
         // 応答待ち中のキーは溜めるだけで入力先へ書き込まない。次のセッションを作らせるためにつつく。
-        if wasPending, effects.isEmpty { pokeClient(input) }
+        if wasPending, effects.isEmpty, runtime.deferredChromeCommit == nil { pokeClient(input) }
         // 「かな」キーは変換するものがなくても入力先へ渡さない。ABC配列の入力先では意味を持たない。
-        let result = apply(effects, to: input) || keyCode == Self.kanaKeyCode
+        let result = apply(effects, to: input, slidesTarget: slidesTarget) || keyCode == Self.kanaKeyCode
         if result { runtime.lastConsumedAt = Date() }
         DiagnosticLog.record(.keyHandled, counters: [state.marked.count])
         return result
@@ -351,6 +392,10 @@ final class SumibiInputController: IMKInputController {
 
     private func finishRequest(_ number: NSNumber, using explicit: (any IMKTextInput)? = nil) {
         guard let request = state.pending, request.id == number.intValue else { return }
+        if runtime.deferredChromeCommit?.id == request.id {
+            finishDeferredChromeCommit(request, input: explicit ?? liveInput())
+            return
+        }
         guard let input = explicit ?? liveInput() else {
             let shouldRetry = runtime.conversion.recordUnavailableClient()
             DiagnosticLog.record(.deliveryRetried, counters: [runtime.conversion.retryCount])
@@ -501,13 +546,104 @@ final class SumibiInputController: IMKInputController {
     }
 
     private func apply(_ effects: [SessionEffect], to input: IMKTextInput,
-                       onReplacementWritten: ((NSRange, String) -> Void)? = nil) -> Bool {
-        InputEffectApplier(runtime: runtime,
+                       onReplacementWritten: ((NSRange, String) -> Void)? = nil,
+                       slidesTarget: ChromeSlidesEditingTarget? = nil) -> Bool {
+        var applier = InputEffectApplier(runtime: runtime,
                        startConversion: { [self] id, request in startConversion(id: id, request: request) },
                        pokeClient: { [self] _ in pokeClient(input) },
                        selectCandidate: { [weak self] index in self?.chooseCandidate(at: index, in: nil) },
                        onReplacementWritten: onReplacementWritten)
-        .apply(effects, to: IMKInputClient(input))
+        if let slidesTarget {
+            applier.retainsComposition = { [self] id, source in
+                guard retainChromeComposition(id: id, source: source, input: input, editingTarget: slidesTarget) else {
+                    runtime.feedback.report(.delivery(.sourceUnavailable, stage: .targetValidation,
+                        sourceCharacters: source.count, sourceUTF16: source.utf16.count))
+                    return false
+                }
+                return true
+            }
+        }
+        return applier.apply(effects, to: IMKInputClient(input))
+    }
+
+    private func retainChromeComposition(id: Int, source: String, input: IMKTextInput,
+                                         editingTarget: ChromeSlidesEditingTarget) -> Bool {
+        guard !IsSecureEventInputEnabled() else {
+            DiagnosticLog.record(.deferredChromeCommitUnavailable)
+            return false
+        }
+        var rawRanges: AmbientRangeReport?
+        var readLength: Int?
+        let snapshot: AmbientInputSnapshot
+        switch AmbientInputSnapshot.capture(source: source, input: IMKInputClient(input),
+            allowVerifiedRelativeComposition: true,
+            onRanges: { rawRanges = $0 }, onSourceRead: { _, length in readLength = length }) {
+        case .success(let captured):
+            snapshot = captured
+        case .failure(let reason):
+            let code: Int
+            switch reason {
+            case .markedUnavailable: code = 1
+            case .markedLengthMismatch: code = 2
+            case .selectionMismatch: code = 3
+            case .sourceUnavailable: code = 4
+            case .sourceMismatch: code = 5
+            default: code = 0
+            }
+            let marked = rawRanges?.marked ?? NSRange(location: NSNotFound, length: 0)
+            let selection = rawRanges?.selection ?? NSRange(location: NSNotFound, length: 0)
+            DiagnosticLog.record(.deferredChromeCommitSnapshotRejected, counters: [
+                code, source.utf16.count,
+                marked.location == NSNotFound ? -1 : marked.location, marked.length,
+                selection.location == NSNotFound ? -1 : selection.location, selection.length,
+                readLength ?? -1
+            ])
+            return false
+        }
+        anchor = nil
+        pendingTarget = nil
+        runtime.deferredChromeCommit = (id, snapshot, input as AnyObject, editingTarget, Self.inputCounts())
+        DiagnosticLog.record(.deferredChromeCommitStarted)
+        return true
+    }
+
+    private func finishDeferredChromeCommit(_ request: PendingRequest, input: (any IMKTextInput)?) {
+        guard let target = runtime.deferredChromeCommit, target.id == request.id,
+              let outcome = runtime.conversion.takeOutcome(id: request.id) else { return }
+        guard let input, (input as AnyObject) === target.client, !IsSecureEventInputEnabled(),
+              NSWorkspace.shared.frontmostApplication?.processIdentifier == target.editingTarget.process else {
+            DiagnosticLog.record(.deferredChromeCommitCancelled)
+            cancelForTargetChange()
+            return
+        }
+        target.editingTarget.revalidate { [self] matchesFocus in
+            applyDeferredChromeOutcome(outcome, to: request, matchesFocus: matchesFocus)
+        }
+    }
+
+    private func applyDeferredChromeOutcome(_ outcome: PendingOutcome, to request: PendingRequest, matchesFocus: Bool) {
+        guard let target = runtime.deferredChromeCommit, target.id == request.id, state.pending == request else { return }
+        runtime.deferredChromeCommit = nil
+        guard matchesFocus, !IsSecureEventInputEnabled(),
+              NSWorkspace.shared.frontmostApplication?.processIdentifier == target.editingTarget.process,
+              let input = liveInput(),
+              (input as AnyObject) === target.client,
+              target.snapshot.matches(IMKInputClient(input)) else {
+            DiagnosticLog.record(.deferredChromeCommitCancelled)
+            cancelForTargetChange()
+            return
+        }
+        guard SettingsStore().slidesDirectConversionEnabled, Self.inputCounts() == target.activity,
+              state.queuedKeys.isEmpty,
+              case .first(let candidate) = outcome, !candidate.isEmpty else {
+            _ = apply(state.completeFirst(id: request.id, result: nil), to: input)
+            return
+        }
+        // Commit the existing marked text in a single operation. A numerical
+        // range in Chrome's temporary input buffer is not a document write target.
+        runtime.candidates.dictionaryCandidates = []
+        _ = apply(state.completeFirst(id: request.id, result: candidate), to: input)
+        DiagnosticLog.record(.deferredChromeCommitSubmitted)
     }
 
     private func observeAmbient(latestKey: String) {

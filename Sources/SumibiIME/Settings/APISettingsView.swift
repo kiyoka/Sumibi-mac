@@ -3,6 +3,7 @@ import SumibiCore
 
 /// API設定の画面。項目名と流れはSumibi-iOSの「API設定」に合わせる。
 struct APISettingsView: View {
+    @AppStorage(SettingsStore.slidesDirectConversionKey) private var slidesDirectConversionEnabled = false
     @State private var model = APISettingsModel(onConfigurationSaved: { InputRuntime.shared.ambient.settingsChanged() })
     @State private var userDictionary = ""
     @State private var isShowingUserDictionary = false
@@ -212,6 +213,12 @@ struct APISettingsView: View {
 
             Section {
                 Button("記号データ（Mozc）のライセンス…") { isShowingMozcLicense = true }
+            }
+
+            Section("入力の互換性") {
+                Toggle("Google SlidesでCtrl+Jの互換性を改善する", isOn: $slidesDirectConversionEnabled)
+                Text("Chromeで編集中のスライドを判別するため、SumibiにmacOSのアクセシビリティ権限が必要です。未確定のローマ字を直接変換するため、Command+Zでローマ字に戻らない場合があります。")
+                    .font(.footnote).foregroundStyle(.secondary)
             }
 
             Section("診断") {
