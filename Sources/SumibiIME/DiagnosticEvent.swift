@@ -47,6 +47,7 @@ enum DiagnosticEvent: String, CaseIterable {
     case committedSourceWaiting, committedSourceRetried, committedSourceConfirmed
     case sourceCommitted, commitAlreadyPresent, replacementWritten
     case deferredChromeCommitStarted, deferredChromeCommitUnavailable
+    case slidesDirectShortcut, slidesDirectTargetRejected
     case deferredChromeCommitSnapshotRejected
     case deferredChromeCommitCancelled, deferredChromeCommitSubmitted
 

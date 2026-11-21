@@ -62,13 +62,45 @@ final class SumibiInputController: IMKInputController {
         guard event.type == .keyDown, let input = sender as? IMKTextInput else { return false }
         let isControlJ = event.modifierFlags.intersection([.shift, .command, .control, .option, .function])
             == .control && event.charactersIgnoringModifiers?.lowercased() == "j"
-        var slidesTarget: ChromeSlidesEditingTarget?
-        if isControlJ, !state.marked.isEmpty, state.pending == nil, !runtime.candidates.shouldBeVisible,
-           input.bundleIdentifier() == ChromeSlidesEditingTarget.chromeBundleID,
+        if isControlJ, input.bundleIdentifier() == ChromeSlidesEditingTarget.chromeBundleID,
            SettingsStore().slidesDirectConversionEnabled {
-            slidesTarget = ChromeSlidesEditingTarget.capture()
+            DiagnosticLog.record(.slidesDirectShortcut, counters: [
+                state.marked.utf16.count, state.pending == nil ? 0 : 1,
+                runtime.candidates.shouldBeVisible ? 1 : 0
+            ])
+            if !state.marked.isEmpty, state.pending == nil, !runtime.candidates.shouldBeVisible,
+               let chrome = NSWorkspace.shared.frontmostApplication,
+               chrome.bundleIdentifier == ChromeSlidesEditingTarget.chromeBundleID {
+                convertAfterChromeKeyDown(event.keyCode, input: input, processID: chrome.processIdentifier)
+                return true
+            }
         }
-        return process(decode(event), keyCode: event.keyCode, in: input, slidesTarget: slidesTarget)
+        return process(decode(event), keyCode: event.keyCode, in: input)
+    }
+
+    private func convertAfterChromeKeyDown(_ keyCode: UInt16, input: IMKTextInput, processID: pid_t) {
+        let source = state.marked
+        let activity = Self.inputCounts()
+        runtime.cancelAmbientSourceWaitForInput()
+        runtime.resultVerifier.cancel()
+        runtime.ambient.stop()
+        runtime.lastConsumedAt = Date()
+        // Let IMK finish returning the key event before querying Chrome off the main thread.
+        DispatchQueue.main.async { [self] in
+            func stillCurrent() -> Bool {
+                !IsSecureEventInputEnabled() && runtime.lastHandler === self
+                    && state.pending == nil && state.marked == source
+                    && !runtime.candidates.shouldBeVisible && Self.inputCounts() == activity
+                    && NSWorkspace.shared.frontmostApplication?.processIdentifier == processID
+            }
+            guard stillCurrent() else { return }
+            ChromeSlidesEditingTarget.capture(process: processID) { slidesTarget in
+                guard stillCurrent(),
+                      let liveClient = self.liveInput(), (liveClient as AnyObject) === (input as AnyObject) else { return }
+                _ = self.process(.convert, keyCode: keyCode, in: liveClient,
+                                 slidesTarget: SettingsStore().slidesDirectConversionEnabled ? slidesTarget : nil)
+            }
+        }
     }
 
     /// 解釈したキーを処理する。右Commandのタップは、キーコードなしの`Control + J`としてここへ来る。
@@ -578,12 +610,25 @@ final class SumibiInputController: IMKInputController {
     private func finishDeferredChromeCommit(_ request: PendingRequest, input: (any IMKTextInput)?) {
         guard let target = runtime.deferredChromeCommit, target.id == request.id,
               let outcome = runtime.conversion.takeOutcome(id: request.id) else { return }
+        guard let input, (input as AnyObject) === target.client, !IsSecureEventInputEnabled(),
+              NSWorkspace.shared.frontmostApplication?.processIdentifier == target.editingTarget.process else {
+            DiagnosticLog.record(.deferredChromeCommitCancelled)
+            cancelForTargetChange()
+            return
+        }
+        target.editingTarget.revalidate { [self] matchesFocus in
+            applyDeferredChromeOutcome(outcome, to: request, matchesFocus: matchesFocus)
+        }
+    }
+
+    private func applyDeferredChromeOutcome(_ outcome: PendingOutcome, to request: PendingRequest, matchesFocus: Bool) {
+        guard let target = runtime.deferredChromeCommit, target.id == request.id, state.pending == request else { return }
         runtime.deferredChromeCommit = nil
-        guard let input, !IsSecureEventInputEnabled(),
+        guard matchesFocus, !IsSecureEventInputEnabled(),
+              NSWorkspace.shared.frontmostApplication?.processIdentifier == target.editingTarget.process,
+              let input = liveInput(),
               (input as AnyObject) === target.client,
-              target.editingTarget.matchesCurrentFocus(),
-              target.snapshot.matches(IMKInputClient(input)),
-              state.pending == request else {
+              target.snapshot.matches(IMKInputClient(input)) else {
             DiagnosticLog.record(.deferredChromeCommitCancelled)
             cancelForTargetChange()
             return
