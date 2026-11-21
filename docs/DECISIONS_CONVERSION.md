@@ -19,8 +19,8 @@ OpenAI Decisions（`gpt-6-luna`）を組み合わせる。「その他」は手�
 `https://generativelanguage.googleapis.com/v1beta/decisions`へ `x-goog-api-key` で認証し、
 名前付き `noul` の肯定確率を使う。`confidence` を閾値と比較しない。
 [PR #214](https://github.com/kiyoka/Sumibi/pull/214)の単件計測では閾値0.9で早すぎる発動が
-0.8より少なかった。Googleの暫定初期値を0.90、設定範囲を0.01～0.99とし、OpenAIの閾値とは
-別に保持する。製品の集約・質問構成はベンチマークと同一ではなく、実機での再評価が必要。
+0.8より少なかった。macOSの実機では0.50が使いやすいタイミングで発動したため、Googleの既定値を
+0.50とする。設定範囲は0.01～0.99で、OpenAIの閾値とは別に保存する。
 
 ## 判定内容と集約
 

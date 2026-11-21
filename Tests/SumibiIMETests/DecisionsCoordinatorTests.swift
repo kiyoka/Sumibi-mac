@@ -186,7 +186,7 @@ final class DecisionsCoordinatorTests: XCTestCase {
         let work = try coordinator.prepare(observation: f.observation, settings: f.store.load())
         XCTAssertEqual(capturedDecisionsProvider, .google)
         XCTAssertEqual(capturedDecisionsKey, "AIzaSy-google-conversion-key")
-        XCTAssertEqual(work.threshold, 0.90)
+        XCTAssertEqual(work.threshold, 0.50)
         XCTAssertEqual(capturedConversionConfig?.allowsRedirects, false)
         XCTAssertEqual(capturedConversionConfig?.endpoint, URL(string: google.endpoint))
         XCTAssertEqual(capturedConversionConfig?.model, google.model)

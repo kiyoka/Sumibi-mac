@@ -169,7 +169,7 @@ Runtimeは状態機械・範囲追跡・通信・候補表示と、最新コン�
 
 [AmbientConversionLifecycle](../Sources/SumibiIME/Conversion/AmbientConversionLifecycle.swift)が
 未確定入力を200msの固定窓で保持し、最大32状態を名前付き質問として判定する。
-OpenAIは`gpt-6-luna`のpredicate（既定閾値0.5）、Googleは`gemini-decision-1`のnoul（暫定初期値0.90）。
+OpenAIは`gpt-6-luna`のpredicate（既定閾値0.5）、Googleは`gemini-decision-1`のnoul（既定閾値0.50）。
 判定タイムアウト10秒、既定オフ。変換と判定の同意は別だが、公式接続先とキーは同じプロバイダーに揃える。
 認可済みの変換先を準備時に固定し、途中の設定変更で別プロバイダーへ送信しない。旧Jev通信は廃止した。
 

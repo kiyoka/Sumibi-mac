@@ -97,7 +97,7 @@ final class DecisionsSettingsModelTests: XCTestCase {
         XCTAssertEqual(model.decisionsModel, "gemini-decision-1")
         XCTAssertEqual(model.conversionKeyDisplay, "****9999")
         XCTAssertFalse(model.showsOpenAIKeyEditor)
-        XCTAssertEqual(model.threshold, 0.90)
+        XCTAssertEqual(model.threshold, 0.50)
         XCTAssertTrue(model.hasConversionConsent)
         model.setEnabled(true)
         XCTAssertFalse(store.load().enabled)

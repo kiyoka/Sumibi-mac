@@ -100,7 +100,7 @@ Chat Completions互換形式。設定済みURLが完全な`chat/completions`で�
 公式の型付き質問と名前付き回答は[OpenAI公式仕様](https://developers.openai.com/api/docs/guides/decisions#how-decisions-work)を
 2026-10-20に確認した。以下の集約・制限はSumibi独自の設定で、API全体の上限ではない。
 
-- 初期値: オフ、同意なし、OpenAI閾値0.5／Google暫定0.90、10秒、1状態512文字、通信上限10,000回。
+- 初期値: オフ、同意なし、OpenAI・Googleの既定閾値0.50、10秒、1状態512文字、通信上限10,000回。
 - 現行Macは自身が保持する単一行のローマ字系入力だけを対象にする。許可文字は
   [AmbientText](../Sources/SumibiCore/Decisions.swift)を参照。英語を確実に除外する決定的な判定ではない。
 - 200ms固定窓は後のキーで延長しない。UIタイマーが遅れてもキー時点で期限を確認し、最大32状態ごとに分割する。

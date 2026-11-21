@@ -27,9 +27,9 @@ public struct DecisionsSettings: Codable, Equatable, Sendable {
     /// Global toggle, as requested. Input safety exclusions belong to the IMK adapter.
     public var permitsSending: Bool { isValid && enabled && consent }
 
-    /// Initial trial value; the benchmark does not replace native IME validation.
+    /// Google uses its own saved threshold or the default chosen from Mac input trials.
     public func threshold(for provider: AIProvider) -> Double {
-        provider == .google ? geminiThreshold ?? 0.90 : threshold
+        provider == .google ? geminiThreshold ?? 0.50 : threshold
     }
 }
 
