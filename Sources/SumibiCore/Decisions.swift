@@ -6,6 +6,7 @@ public struct DecisionsSettings: Codable, Equatable, Sendable {
     public var consent = false
     public var model = "gpt-6-luna"
     public var threshold = 0.5
+    public var geminiThreshold: Double?
     public var timeout: TimeInterval = 10
     public var maximumCharacters = 512
     public var maximumCalls = 10_000
@@ -15,6 +16,7 @@ public struct DecisionsSettings: Codable, Equatable, Sendable {
 
     public var isValid: Bool {
         threshold.isFinite && (0...1).contains(threshold)
+            && (geminiThreshold.map { (0.01...0.99).contains($0) } ?? true)
             && timeout.isFinite && timeout > 0 && timeout <= 60
             && maximumCharacters > 0 && maximumCharacters <= 512
             && maximumCalls > 0 && maximumCalls <= 1_000_000
@@ -24,6 +26,11 @@ public struct DecisionsSettings: Codable, Equatable, Sendable {
 
     /// Global toggle, as requested. Input safety exclusions belong to the IMK adapter.
     public var permitsSending: Bool { isValid && enabled && consent }
+
+    /// Initial trial value; the benchmark does not replace native IME validation.
+    public func threshold(for provider: AIProvider) -> Double {
+        provider == .google ? geminiThreshold ?? 0.90 : threshold
+    }
 }
 
 public struct DecisionsObservation: Equatable, Sendable {
@@ -49,19 +56,19 @@ public enum DecisionsError: Error, Equatable, Sendable {
 
     public var message: String {
         switch self {
-        case .missingKey: "OpenAI用のAPIキーが未設定、または読み出せません。"
+        case .missingKey: "現在の接続先のAPIキーが未設定、または読み出せません。"
         case .invalidSettings: "Decisionsの設定が正しくありません。"
         case .invalidResponse: "Decisionsから有効な判定結果を取得できませんでした。"
-        case .authentication: "OpenAI用APIキーの認証に失敗しました。OpenAI用APIキーの設定を確認してください。"
-        case .rateLimited: "OpenAI APIの利用上限に達しました。"
-        case .server: "OpenAI APIでサーバーエラーが発生しました。"
-        case .http: "OpenAI APIがエラーを返しました。"
+        case .authentication: "判定APIの認証に失敗しました。現在の接続先のAPIキーを確認してください。"
+        case .rateLimited: "判定APIの利用上限に達しました。"
+        case .server: "判定APIでサーバーエラーが発生しました。"
+        case .http: "判定APIがエラーを返しました。"
         case .timedOut: "Decisions判定がタイムアウトしました。"
         case .offline: "Decisions判定に必要なネットワークへ接続できません。"
         case .network: "Decisions判定の通信に失敗しました。"
         case .requestLimit: "Decisions判定回数の上限に達しました。費用を確認してリセットしてください。"
         case .unsupportedProvider: "自動判定は公式OpenAI（https://api.openai.com）またはGoogle（https://generativelanguage.googleapis.com/v1beta/openai）の接続先でのみ利用できます。「その他」の接続先では利用できません。"
-        case .refused: "OpenAIがこの入力の自動判定を拒否しました。入力は変更していません。手動変換を試してください。"
+        case .refused: "判定APIがこの入力の自動判定を拒否しました。入力は変更していません。手動変換を試してください。"
         }
     }
 }

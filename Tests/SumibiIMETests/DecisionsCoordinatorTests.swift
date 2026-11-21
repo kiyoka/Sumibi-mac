@@ -144,7 +144,7 @@ final class DecisionsCoordinatorTests: XCTestCase {
         XCTAssertEqual(f.store.calls, 0)
     }
 
-    func testGoogleProviderUsesOpenAIKeyForDecisionsAndGoogleKeyForConversionWithoutCrossingKeys() async throws {
+    func testGoogleProviderUsesOnlyGoogleKeyForDecisionsAndConversion() async throws {
         let f = try make()
         let google = ProviderConfiguration(
             provider: .google,
@@ -153,13 +153,14 @@ final class DecisionsCoordinatorTests: XCTestCase {
         )
         try f.manual.saveProviderConfiguration(google)
         f.manual.saveConsent(for: google.endpoint)
-        try f.store.save(f.store.load(), conversionEndpoint: google.endpoint)
+        try f.store.save(f.store.load(), conversionEndpoint: google.endpoint, grantingConsent: true)
 
         let sharedKeychain = RecordingKeychain(storage: [
             "endpoint:https://api.openai.com": Data("sk-openai-decisions-key".utf8),
             "endpoint:https://generativelanguage.googleapis.com/v1beta/openai": Data("AIzaSy-google-conversion-key".utf8)
         ])
         var capturedDecisionsKey: String?
+        var capturedDecisionsProvider: AIProvider?
         var capturedConversionConfig: OpenAICompatibleConfiguration?
         let conversion = ConversionCoordinator(
             settings: f.manual,
@@ -175,14 +176,18 @@ final class DecisionsCoordinatorTests: XCTestCase {
             manualSettings: f.manual,
             keys: APIKeyStore(keychain: sharedKeychain),
             conversion: conversion,
-            makeDecisions: { key, _ in
+            makeDecisions: { provider, key, _ in
+                capturedDecisionsProvider = provider
                 capturedDecisionsKey = key
                 return FixedDecisionsScore()
             }
         )
 
         let work = try coordinator.prepare(observation: f.observation, settings: f.store.load())
-        XCTAssertEqual(capturedDecisionsKey, "sk-openai-decisions-key")
+        XCTAssertEqual(capturedDecisionsProvider, .google)
+        XCTAssertEqual(capturedDecisionsKey, "AIzaSy-google-conversion-key")
+        XCTAssertEqual(work.threshold, 0.90)
+        XCTAssertEqual(capturedConversionConfig?.allowsRedirects, false)
         XCTAssertEqual(capturedConversionConfig?.endpoint, URL(string: google.endpoint))
         XCTAssertEqual(capturedConversionConfig?.model, google.model)
         XCTAssertEqual(capturedConversionConfig?.apiKey, "AIzaSy-google-conversion-key")
@@ -192,11 +197,9 @@ final class DecisionsCoordinatorTests: XCTestCase {
         let converted = await work.convert()
         XCTAssertEqual(converted, Result<ConversionResult, ConversionError>.success(ConversionResult(candidates: ["日本語"])))
 
-        // If OpenAI key is missing while Google key exists, prepare fails with .missingKey.
+        // An OpenAI key is not needed at all.
         sharedKeychain.storage?["endpoint:https://api.openai.com"] = nil
-        XCTAssertThrowsError(try coordinator.prepare(observation: f.observation, settings: f.store.load())) {
-            XCTAssertEqual($0 as? DecisionsError, .missingKey)
-        }
+        XCTAssertNoThrow(try coordinator.prepare(observation: f.observation, settings: f.store.load()))
 
         // If Google key is missing, prepare fails before reading the OpenAI key.
         sharedKeychain.storage?["endpoint:https://api.openai.com"] = Data("sk-openai-decisions-key".utf8)
@@ -207,6 +210,18 @@ final class DecisionsCoordinatorTests: XCTestCase {
         }
         let queriedAccounts = sharedKeychain.queries.compactMap { $0[kSecAttrAccount as String] as? String }
         XCTAssertFalse(queriedAccounts.contains("endpoint:https://api.openai.com"))
+
+        try f.manual.saveProviderConfiguration(ProviderConfiguration())
+        f.manual.saveConsent(for: ProviderConfiguration.defaultEndpoint)
+        XCTAssertFalse(work.remainsAuthorized())
+        do {
+            _ = try await work.score(f.observation)
+            XCTFail("Old work must not start scoring after switching providers")
+        } catch { XCTAssertTrue(error is CancellationError) }
+        let staleConversion = await work.convert()
+        XCTAssertEqual(staleConversion, .failure(.consentMissing))
+        let requests = await f.converter.requests
+        XCTAssertEqual(requests.count, 1)
     }
 
     func testPreparedConversionUsesExistingProviderAndStripsTriggerPunctuation() async throws {
@@ -247,7 +262,10 @@ private final class DecisionsAuthorizationFixture {
             responseMode: { "api" }, makeClient: { _ in self.converter })
         return DecisionsCoordinator(store: store, manualSettings: manual,
             keys: APIKeyStore(keychain: decisionsKeys),
-            conversion: conversion, makeDecisions: { _, _ in FixedDecisionsScore() })
+            conversion: conversion, makeDecisions: { provider, _, _ in
+                XCTAssertEqual(provider, .openAI)
+                return FixedDecisionsScore()
+            })
     }
 }
 

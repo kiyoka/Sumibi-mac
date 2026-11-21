@@ -5,13 +5,16 @@ public struct OpenAICompatibleConfiguration: Equatable, Sendable {
     public let model: String
     public let apiKey: String
     public let timeout: TimeInterval
+    public let allowsRedirects: Bool
 
     /// タイムアウトの既定値は仕様どおり60秒。
-    public init(endpoint: URL, model: String, apiKey: String, timeout: TimeInterval = 60) {
+    public init(endpoint: URL, model: String, apiKey: String, timeout: TimeInterval = 60,
+                allowsRedirects: Bool = true) {
         self.endpoint = endpoint
         self.model = model
         self.apiKey = apiKey
         self.timeout = timeout
+        self.allowsRedirects = allowsRedirects
     }
 }
 
@@ -74,9 +77,9 @@ public struct OpenAICompatibleClient: ConversionService {
     private let configuration: OpenAICompatibleConfiguration
     private let session: URLSession
 
-    public init(configuration: OpenAICompatibleConfiguration, session: URLSession = .shared) {
+    public init(configuration: OpenAICompatibleConfiguration, session: URLSession? = nil) {
         self.configuration = configuration
-        self.session = session
+        self.session = session ?? (configuration.allowsRedirects ? .shared : DecisionsTransport.session)
     }
 
     public func convert(_ request: ConversionRequest) async throws -> ConversionResult {
@@ -100,6 +103,7 @@ public struct OpenAICompatibleClient: ConversionService {
         let data: Data
         let response: URLResponse
         do {
+            try Task.checkCancellation()
             (data, response) = try await session.data(for: urlRequest)
         } catch let error as URLError {
             switch error.code {

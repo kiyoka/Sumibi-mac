@@ -8,18 +8,10 @@ public struct DecisionsClient: DecisionsService {
     private let key: String
     private let settings: DecisionsSettings
     private let session: URLSession
-    private static let productionSession: URLSession = {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.httpShouldSetCookies = false
-        configuration.httpCookieStorage = nil
-        configuration.urlCredentialStorage = nil
-        configuration.urlCache = nil
-        return URLSession(configuration: configuration, delegate: DecisionsRedirectGuard(), delegateQueue: nil)
-    }()
 
     public init(key: String, settings: DecisionsSettings = DecisionsSettings(), session: URLSession? = nil) {
         self.key = key; self.settings = settings
-        self.session = session ?? Self.productionSession
+        self.session = session ?? DecisionsTransport.session
     }
 
     /// Same experimental Japanese-likeness predicate as Emacs PR #194.
@@ -36,7 +28,7 @@ public struct DecisionsClient: DecisionsService {
         let input: String
         let questions: [Question]
     }
-    private struct Evidence: Encodable {
+    struct Evidence: Encodable {
         struct State: Encodable { let id: String; let text: String }
         let states: [State]
     }
@@ -62,12 +54,20 @@ public struct DecisionsClient: DecisionsService {
         let input = String(decoding: try JSONEncoder().encode(Evidence(states: states)), as: UTF8.self)
         let questions = states.map { state in
             Payload.Question(name: state.id, instructions:
-                "Evaluate ONLY the text field of the state with id \(state.id). Ignore every other state, including later/longer prefixes; do not use them to resolve ambiguity. Each state is independent.\n" + Self.instructions)
+                Self.instructions(forState: state.id))
         }
         return try request(Payload(model: settings.model, input: input, questions: questions))
     }
 
+    static func instructions(forState id: String) -> String {
+        "Evaluate ONLY the text field of the state with id \(id). Ignore every other state, including later/longer prefixes; do not use them to resolve ambiguity. Each state is independent.\n" + instructions
+    }
+
     private func validate(_ observations: [DecisionsObservation]) throws {
+        try Self.validate(observations, settings: settings, key: key)
+    }
+
+    static func validate(_ observations: [DecisionsObservation], settings: DecisionsSettings, key: String) throws {
         guard settings.isValid, !observations.isEmpty, observations.count <= Self.maximumBatchSize,
               observations.allSatisfy({ $0.text.count <= settings.maximumCharacters }) else { throw DecisionsError.invalidSettings }
         guard !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -95,9 +95,35 @@ public struct DecisionsClient: DecisionsService {
     }
 
     private func send(_ request: URLRequest, names: [String]) async throws -> [DecisionsAnswer] {
+        let data = try await DecisionsTransport.send(request, session: session, timeout: settings.timeout)
+        guard let decoded = try? JSONDecoder().decode(Response.self, from: data),
+              decoded.answers.count == names.count,
+              Set(decoded.answers.map(\.name)) == Set(names) else { throw DecisionsError.invalidResponse }
+        let byName = Dictionary(uniqueKeysWithValues: decoded.answers.map { ($0.name, $0) })
+        return try names.map { name in
+            guard let answer = byName[name] else { throw DecisionsError.invalidResponse }
+            if answer.type == "refusal" { return .refused }
+            guard answer.type == "predicate", answer.refusal == nil,
+                  let value = answer.probability, value.isFinite, (0...1).contains(value) else { throw DecisionsError.invalidResponse }
+            return .probability(value)
+        }
+    }
+}
+
+enum DecisionsTransport {
+    static let session: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpShouldSetCookies = false
+        configuration.httpCookieStorage = nil
+        configuration.urlCredentialStorage = nil
+        configuration.urlCache = nil
+        return URLSession(configuration: configuration, delegate: DecisionsRedirectGuard(), delegateQueue: nil)
+    }()
+
+    static func send(_ request: URLRequest, session: URLSession, timeout: TimeInterval) async throws -> Data {
         try Task.checkCancellation()
         let response: (Data, URLResponse)
-        let network = session; let timeout = settings.timeout
+        let network = session
         do {
             response = try await withThrowingTaskGroup(of: (Data, URLResponse).self) { group in
                 group.addTask { try await network.data(for: request) }
@@ -128,17 +154,7 @@ public struct DecisionsClient: DecisionsService {
         case 500..<600: throw DecisionsError.server
         default: throw DecisionsError.http
         }
-        guard let decoded = try? JSONDecoder().decode(Response.self, from: response.0),
-              decoded.answers.count == names.count,
-              Set(decoded.answers.map(\.name)) == Set(names) else { throw DecisionsError.invalidResponse }
-        let byName = Dictionary(uniqueKeysWithValues: decoded.answers.map { ($0.name, $0) })
-        return try names.map { name in
-            guard let answer = byName[name] else { throw DecisionsError.invalidResponse }
-            if answer.type == "refusal" { return .refused }
-            guard answer.type == "predicate", answer.refusal == nil,
-                  let value = answer.probability, value.isFinite, (0...1).contains(value) else { throw DecisionsError.invalidResponse }
-            return .probability(value)
-        }
+        return response.0
     }
 }
 

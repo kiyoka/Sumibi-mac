@@ -19,11 +19,12 @@ struct DecisionsSettingsView: View {
                     Text("全アプリの全テキストではなく、Sumibiが保持する現在の未確定文字列だけを判定します。コードの構文や独自の機密欄を確実には判別できないため、機密入力の前はオフにしてください。")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
-                Section("判定：OpenAI Decisions API") {
-                    Text("判定先：https://api.openai.com/v1/decisions")
+                if model.isSupportedProvider {
+                  Section("判定：\(model.decisionsName)") {
+                    Text("判定先：\(model.decisionsEndpoint.absoluteString)")
                         .textSelection(.enabled)
-                    Text("モデル：gpt-6-luna")
-                    if model.isSupportedProvider {
+                    Text("モデル：\(model.decisionsModel)")
+                    if model.conversionProvider == .openAI {
                         if model.showsOpenAIKeyEditor {
                             SecureField(model.hasStoredKey ? "新しいOpenAI用APIキー" : "OpenAI用APIキー",
                                         text: $model.openAIKeyInput,
@@ -65,17 +66,18 @@ struct DecisionsSettingsView: View {
                                 }
                             }
                         }
-                    } else {
-                        LabeledContent("OpenAI用APIキー", value: "利用不可")
-                            .foregroundStyle(.secondary)
                     }
                     if model.conversionProvider == .google {
-                        Text("自動変換のタイミング判定は常にOpenAI（https://api.openai.com/v1/decisions）で行います。ここで保存するキーはOpenAI接続先（https://api.openai.com）のKeychain項目に保存され、親画面でOpenAIを選んだときの変換用キーとも共有されます。この画面ではキーの入力・変更のみ行えます（削除は親画面でOpenAIを選択して行います）。")
+                        Text("判定にも変換と同じGoogle用APIキーを使います。キーの変更は親画面で行ってください。OpenAIへは送信しません。")
                             .font(.footnote).foregroundStyle(.secondary)
+                        Link("Gemini Decisionsの判定料金（入力トークン）",
+                             destination: URL(string: "https://aistudio.google.com/docs/pricing#gemini-decision")!)
+                            .font(.footnote)
                     } else {
                         Text("親画面のOpenAI接続先（https://api.openai.com）と共通のAPIキーを使います。この画面ではキーの入力・変更のみ行えます（削除は親画面で行います）。旧Jev用キーは使用しません。")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
+                  }
                 }
                 Section("変換：現在の接続先") {
                     LabeledContent("変換接続先", value: model.conversionProviderName)
@@ -92,27 +94,21 @@ struct DecisionsSettingsView: View {
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("送信と料金への同意") {
-                    Toggle(model.conversionProvider == .google
-                           ? "OpenAI（判定）およびGoogle（変換）への入力データ送信に同意する"
-                           : "OpenAIへの入力データ送信に同意する",
+                    Toggle("\(model.conversionProviderName)への自動送信（判定・変換）に同意する",
                            isOn: Binding(get: { model.settings.consent }, set: { model.setConsent($0) }))
                         .disabled(!model.isSupportedProvider)
-                    Text("オンと同意の両方が揃うと、入力中の未確定文字列（1状態最大512文字）が判定のためOpenAIへ自動送信されます。最初の入力から200ms分の各状態をID付きでまとめ、最大32状態ずつ判定します。文書全体・周辺文脈・クリップボードは送信せず、入力内容はログへ記録しません。")
+                    Text("オンと同意の両方が揃うと、入力中の未確定文字列（1状態最大512文字）を現在の変換先と同じサービスへ判定のため自動送信します。最初の入力から200ms分の各状態をID付きでまとめ、最大32状態ずつ判定します。文書全体・周辺文脈・クリップボードは送信せず、入力内容はログへ記録しません。")
                         .font(.footnote).foregroundStyle(.secondary)
-                    if model.conversionProvider == .google {
-                        Text("Decisionsが日本語らしさを判定し、閾値以上でGoogle（Gemini API）へ変換対象とユーザー辞書を送信して漢字変換を開始します。句読点・空白・入力停止は必須ではなく、短い途中入力も対象です。判定分はOpenAI、変換分はGoogleの料金がそれぞれ別々に発生します。変換の接続先を変更した場合や同意を取り消した場合は自動変換もオフになります。")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    } else {
-                        Text("Decisionsが日本語らしさを判定し、閾値以上で漢字変換を開始します。句読点・空白・入力停止は必須ではなく、短い途中入力も対象です。判定と漢字変換の料金が別々に発生します。変換の接続先を変更した場合や同意を取り消した場合は自動変換もオフになります。旧Jevへの同意は引き継ぎません。")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    }
+                    Text("閾値以上なら、同じサービスへ変換対象とユーザー辞書を送って漢字変換します。判定と漢字変換は別々に課金されます。接続先の変更や同意の取り消しで自動変換はオフになります。旧Jev・旧混在構成への同意は引き継ぎません。")
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("判定と費用の上限") {
                     HStack {
                         Text("判定閾値")
-                        Slider(value: Binding(get: { model.settings.threshold },
-                            set: { model.setThreshold($0) }), in: 0...1, step: 0.05)
-                        Text(model.settings.threshold, format: .number.precision(.fractionLength(2)))
+                        Slider(value: Binding(get: { model.threshold },
+                            set: { model.setThreshold($0) }), in: model.thresholdRange,
+                            step: model.conversionProvider == .google ? 0.01 : 0.05)
+                        Text(model.threshold, format: .number.precision(.fractionLength(2)))
                             .monospacedDigit()
                     }
                     Stepper("判定回数上限：\(model.settings.maximumCalls)回",
@@ -170,7 +166,7 @@ struct DecisionsSettingsView: View {
                                 .font(.footnote).foregroundStyle(.secondary)
                         }
                     }
-                    Text("回数は全アプリ共通で保存し、失敗した送信も数えます。アプリ切替・再起動ではリセットされません。上限に達しても手動変換は使えます。")
+                    Text("回数は全アプリ・接続先で共通に保存し、失敗した送信も数えます。接続先切替・再起動ではリセットされません。上限に達しても手動変換は使えます。")
                         .font(.footnote).foregroundStyle(.secondary)
                     Button("費用を確認して判定回数をリセット") { resetting = true }
                 }
@@ -187,7 +183,7 @@ struct DecisionsSettingsView: View {
         }
         .frame(width: 560, height: 650)
         .onAppear { InputRuntime.shared.ambient.stop(); model.reload() }
-        .confirmationDialog("OpenAIの費用を確認しましたか？", isPresented: $resetting, titleVisibility: .visible) {
+        .confirmationDialog("判定APIの費用を確認しましたか？", isPresented: $resetting, titleVisibility: .visible) {
             Button("確認済み・リセットする") { model.resetCalls() }
             Button("キャンセル", role: .cancel) {}
         } message: { Text("リセットすると上限まで新たな有料判定が可能になります。請求額や既に発生した料金は消えません。") }

@@ -4,6 +4,23 @@ import SumibiCore
 
 final class AmbientConversionLifecycleTests: XCTestCase {
     @MainActor
+    func testPreparedProviderThresholdTakesPrecedenceOverOpenAIThreshold() async throws {
+        for (score, expected) in [(0.89, 0), (0.90, 1)] {
+            let f = try fixture()
+            let life = f.lifecycle { _, _ in
+                var work = f.work(score: { _ in score })
+                work.threshold = 0.90
+                return work
+            }
+            life.observe(f.target("nihongo"))
+            await wait { life.lastDecision != nil && life.phase == .idle }
+            XCTAssertEqual(life.lastDecision?.threshold, 0.90)
+            XCTAssertEqual(f.converted, expected)
+            XCTAssertEqual(f.store.calls, 1)
+        }
+    }
+
+    @MainActor
     private func fixture(enabled: Bool = true) throws -> AmbientFixture {
         try AmbientFixture(enabled: enabled)
     }
