@@ -12,6 +12,7 @@
 | 記号候補・データ生成・ライセンス | [記号](SYMBOL_CANDIDATES.md) |
 | 一時デバッグ・原文比較の使い方 | [診断画面](DIAGNOSTICS_SETTINGS.md)、[ログ規約](DIAGNOSTIC_LOGGING.md) |
 | 長文の制約・エラーと対処 | [長文診断](LONG_INPUT_DIAGNOSTICS.md)、[表示](CONVERSION_FEEDBACK.md) |
+| ChromeでのSlides・Docs・Sheets入力互換性 | [Google編集アプリの実機調査](GOOGLE_EDITORS_COMPATIBILITY.md) |
 | ビルドと回帰テスト | [通常／開発ビルド](BUILD_MODES.md)、[Tests](../Tests/README.md) |
 | 配布・署名・公証・残作業 | [自己配布](DIRECT_DISTRIBUTION.md)、[Developer ID](DEVELOPER_ID_DISTRIBUTION.md) |
 
