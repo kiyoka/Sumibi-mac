@@ -129,7 +129,7 @@ flowchart TB
 | 一時デバッグの本文 | 明示オン時のみメモリ表示、再起動後オフ。オフ・設定変更・次の試行等で破棄 | ログ・UserDefaults・ファイルへ保存しない。mainとPR #66の表示範囲の差を区別する |
 | 診断ログ | DiagnosticLogへ固定分類・数値だけを渡す | OSログへ出力。通常は失敗分類、詳細ログ有効時は数値も含む。本文・キー・URL・生応答・アプリ名は出さない |
 
-自動送信は既定オフで、親設定の変換送信同意に加え、現在の変換接続先（公式`OpenAI`または公式`Google`、「その他」は不可）に対する独立した自動送信同意、判定用のOpenAIキー（`endpoint:https://api.openai.com`）、および変換接続先のキーが必要。変換接続先を切り替えた場合は自動変換がオフになり再同意が必要になる。`DecisionsCoordinator.prepare`は認可済みの仕事を組み立てるだけで通信しない。
+自動送信は既定オフで、親設定の変換送信同意に加え、現在の変換接続先（公式`OpenAI`または公式`Google`、「その他」は不可）に対する独立した自動送信同意、同じプロバイダーの変換用キーが必要（#76作業版）。変換接続先を切り替えた場合は自動変換がオフになり再同意が必要になる。`DecisionsCoordinator.prepare`は認可済みの仕事を組み立てるだけで通信しない。
 送信前・結果適用前にも設定や認可が維持されているか検査する。手動と自動の適用条件を一括して
 同一とは扱わない。根拠は[ConversionCoordinator](../Sources/SumibiIME/Conversion/ConversionCoordinator.swift)、
 [DecisionsCoordinator](../Sources/SumibiIME/Conversion/DecisionsCoordinator.swift)、
@@ -165,12 +165,13 @@ Runtimeは状態機械・範囲追跡・通信・候補表示と、最新コン�
 
 選択範囲の変換は、追跡中の原文や安全に再変換できる直前結果がないとき、選択文字列を取得して同じ変換経路を使う。まず選択範囲を同じ文字列で確定し、応答時に照合してその範囲だけを置換する。
 
-### 4.1 Decisions自動変換（mainへ統合済み）
+### 4.1 Decisions自動変換（同一プロバイダー化は#76作業版）
 
 [AmbientConversionLifecycle](../Sources/SumibiIME/Conversion/AmbientConversionLifecycle.swift)が
-未確定入力を200msの固定窓で保持し、最大32状態を名前付きpredicate質問として判定する。
-モデルは`gpt-6-luna`、既定閾値0.5、判定タイムアウト10秒。既定オフで、親画面の変換同意と
-独立した自動送信同意、公式`OpenAI`または公式`Google`の変換接続先、および判定用OpenAIキーと変換用キーが必要。旧Jev通信は廃止した。
+未確定入力を200msの固定窓で保持し、最大32状態を名前付き質問として判定する。
+OpenAIは`gpt-6-luna`のpredicate（既定閾値0.5）、Googleは`gemini-decision-1`のnoul（既定閾値0.50）。
+判定タイムアウト10秒、既定オフ。変換と判定の同意は別だが、公式接続先とキーは同じプロバイダーに揃える。
+認可済みの変換先を準備時に固定し、途中の設定変更で別プロバイダーへ送信しない。旧Jev通信は廃止した。
 
 自動変換中の入力は即時処理し、古い結果を世代・原文・対象で照合して破棄する。
 判定・漢字変換・読取確認を直列化し、未送信256状態、累積通信10,000回という別の上限を持つ。
@@ -274,7 +275,7 @@ Undoは入力先の標準編集履歴へ委ねる。原文の確定と範囲指�
 
 ## 7. 設定・メニューバー（実装済みと未実装）
 
-[SettingsWindowController](../Sources/SumibiIME/Settings/SettingsWindowController.swift)が一つのNSWindowとNSHostingViewを保持する。画面はAPI設定（`OpenAI`／`Google`／`その他`の接続先切替、OpenAI代表モデル／自由入力、Googleの`Gemini 3.6 Flash`／`Gemini 3.5 Flash-Lite`の2モデル選択、カスタムURL／モデル入力）、送信先・料金・同意、Decisions設定への入口（Google／その他選択時は利用不可理由を表示）、ユーザー辞書への入口、`provider + model`別の利用状況（変換回数・入力／キャッシュ入力／出力／内訳不明／合計トークン・概算USD費用・リセット）、Mozcライセンス閲覧、「診断・デバッグ…」、保存・APIキー削除。一時本文表示は明示オン・メモリ内限定・再起動後オフで、ログへ流さない。文脈・文体・変換テストは未実装である。
+[SettingsWindowController](../Sources/SumibiIME/Settings/SettingsWindowController.swift)が一つのNSWindowとNSHostingViewを保持する。画面はAPI設定（`OpenAI`／`Google`／`その他`の接続先切替、OpenAI代表モデル／自由入力、Googleの`Gemini 3.6 Flash`／`Gemini 3.5 Flash-Lite`の2モデル選択、カスタムURL／モデル入力）、送信先・料金・同意、Decisions設定への入口（「その他」選択時は利用不可理由を表示）、ユーザー辞書への入口、`provider + model`別の利用状況（変換回数・入力／キャッシュ入力／出力／内訳不明／合計トークン・概算USD費用・リセット）、Mozcライセンス閲覧、「診断・デバッグ…」、保存・APIキー削除。一時本文表示は明示オン・メモリ内限定・再起動後オフで、ログへ流さない。文脈・文体・変換テストは未実装である。
 
 接続先ごとの設定・モデル・辞書・利用統計は[SettingsStore](../Sources/SumibiIME/Settings/SettingsStore.swift)のUserDefaults、APIキーは[APIKeyStore](../Sources/SumibiIME/Settings/APIKeyStore.swift)のKeychain（送信先エンドポイント別アカウント`endpoint:<url>`）へ保存する。キーは固定長の伏せ字と末尾4文字で表示し、「変更」から空の編集欄を開く。保存するまで既存キーは保持する。API入力欄は変換対象外で、辞書編集シート中だけ自アプリでの変換を許可する。
 

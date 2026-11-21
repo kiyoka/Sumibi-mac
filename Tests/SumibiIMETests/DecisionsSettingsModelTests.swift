@@ -4,6 +4,19 @@ import SumibiCore
 @testable import SumibiIME
 
 final class DecisionsSettingsModelTests: XCTestCase {
+    func testLegacyOpenAIConsentAndThresholdRemainActive() throws {
+        let name = "org.sumibi.tests.decisions-ui-legacy.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set(Data(#"{"enabled":true,"consent":true,"model":"gpt-6-luna","threshold":0.65,"timeout":10,"maximumCharacters":512,"maximumCalls":5000,"batchWindowMilliseconds":200}"#.utf8),
+                     forKey: "decisionsSettings")
+        let store = DecisionsSettingsStore(defaults: defaults)
+        XCTAssertTrue(store.load().permitsSending)
+        XCTAssertTrue(store.hasConsent(forConversionEndpoint: ProviderConfiguration.defaultEndpoint))
+        XCTAssertEqual(store.load().threshold(for: .openAI), 0.65)
+        XCTAssertFalse(store.hasConsent(forConversionEndpoint: AIProvider.google.defaultEndpoint))
+    }
+
     private func isolated(_ body: (DecisionsSettingsModel, DecisionsSettingsStore, RecordingKeychain, SettingsStore) throws -> Void) throws {
         let name = "org.sumibi.tests.decisions-ui.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
@@ -52,78 +65,63 @@ final class DecisionsSettingsModelTests: XCTestCase {
             XCTAssertTrue(model.statusMessage.contains("公式OpenAI"))
         }
     }
-
-    func testGoogleProviderAllowsSavingAndUpdatingOpenAIKeyAndEnablingDecisions() throws {
+    func testGoogleRequiresNewConsentAndUsesOnlyGoogleKey() throws {
         let name = "org.sumibi.tests.decisions-ui-google.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         let store = DecisionsSettingsStore(defaults: defaults)
         let manual = SettingsStore(defaults: defaults, prototypeDefaults: { nil })
-        let google = ProviderConfiguration(
-            provider: .google,
-            endpoint: AIProvider.google.defaultEndpoint,
-            model: GeminiModelOption.quality.rawValue
-        )
+        let google = ProviderConfiguration(provider: .google, endpoint: AIProvider.google.defaultEndpoint,
+            model: GeminiModelOption.quality.rawValue)
         try manual.saveProviderConfiguration(google)
         manual.saveConsent(for: google.endpoint)
 
+        // Simulate preferences written by the old mixed OpenAI/Google build.
+        var old = DecisionsSettings()
+        old.enabled = true
+        old.consent = true
+        old.threshold = 0.65
+        old.maximumCalls = 5_000
+        defaults.set(try JSONEncoder().encode(old), forKey: "decisionsSettings")
+        defaults.set(google.endpoint, forKey: "decisionsConsentConversionEndpoint")
+        XCTAssertTrue(store.reserve(limit: old.maximumCalls))
+        XCTAssertFalse(store.load().permitsSending) // Before opening settings.
+        XCTAssertFalse(store.hasConsent(forConversionEndpoint: google.endpoint))
+
         let keychain = RecordingKeychain(storage: [
-            "endpoint:https://generativelanguage.googleapis.com/v1beta/openai": Data("AIzaSy-google-key-9999".utf8)
+            APIKeyStore.account(for: google.endpoint): Data("fake-google-key-9999".utf8)
         ])
         let model = DecisionsSettingsModel(store: store, keys: APIKeyStore(keychain: keychain), manualSettings: manual)
-
         model.reload()
         XCTAssertTrue(model.isSupportedProvider)
-        XCTAssertEqual(model.conversionProvider, .google)
-        XCTAssertEqual(model.conversionProviderName, "Google")
-        XCTAssertEqual(model.conversionModelDisplay, "gemini-3.6-flash")
+        XCTAssertEqual(model.decisionsModel, "gemini-decision-1")
         XCTAssertEqual(model.conversionKeyDisplay, "****9999")
+        XCTAssertFalse(model.showsOpenAIKeyEditor)
+        XCTAssertEqual(model.threshold, 0.50)
         XCTAssertTrue(model.hasConversionConsent)
-        XCTAssertNil(model.storedKeyDisplay)
-        XCTAssertFalse(model.hasStoredKey)
-        XCTAssertTrue(model.showsOpenAIKeyEditor)
-
-        // Cannot enable without OpenAI key even if consent is turned on.
-        model.setConsent(true)
-        XCTAssertTrue(store.load().consent)
-        XCTAssertTrue(store.hasConsent(forConversionEndpoint: google.endpoint))
         model.setEnabled(true)
         XCTAssertFalse(store.load().enabled)
-        XCTAssertTrue(model.statusIsError)
-
-        // Save OpenAI key from DecisionsSettingsModel.
-        model.openAIKeyInput = "sk-openai-key-1234"
-        model.saveOpenAIKey()
-        XCTAssertFalse(model.statusIsError)
-        XCTAssertEqual(model.storedKeyDisplay, "****1234")
-        XCTAssertTrue(model.hasStoredKey)
-        XCTAssertFalse(model.showsOpenAIKeyEditor)
-        XCTAssertTrue(model.openAIKeyInput.isEmpty)
-        XCTAssertEqual(keychain.storage?["endpoint:https://api.openai.com"], Data("sk-openai-key-1234".utf8))
-        XCTAssertEqual(
-            keychain.storage?["endpoint:https://generativelanguage.googleapis.com/v1beta/openai"],
-            Data("AIzaSy-google-key-9999".utf8)
-        )
-
-        // Begin and cancel editing OpenAI key.
-        model.beginOpenAIKeyEditing()
-        XCTAssertTrue(model.showsOpenAIKeyEditor)
-        model.openAIKeyInput = "sk-unsaved"
-        model.cancelOpenAIKeyEditing()
-        XCTAssertFalse(model.showsOpenAIKeyEditor)
-        XCTAssertEqual(model.storedKeyDisplay, "****1234")
-
-        // Update OpenAI key to a new value.
-        model.beginOpenAIKeyEditing()
-        model.openAIKeyInput = "sk-openai-key-5678"
-        model.saveOpenAIKey()
-        XCTAssertEqual(model.storedKeyDisplay, "****5678")
-        XCTAssertEqual(keychain.storage?["endpoint:https://api.openai.com"], Data("sk-openai-key-5678".utf8))
-
-        // Now enabling Decisions succeeds.
+        model.setConsent(true)
         model.setEnabled(true)
-        XCTAssertFalse(model.statusIsError)
+        model.setThreshold(0.95)
+        model.setThreshold(1)
+        model.reload()
         XCTAssertTrue(store.load().permitsSending)
+        XCTAssertTrue(store.hasConsent(forConversionEndpoint: google.endpoint))
+        XCTAssertFalse(store.hasConsent(forConversionEndpoint: ProviderConfiguration.defaultEndpoint))
+        XCTAssertNil(defaults.string(forKey: "decisionsConsentConversionEndpoint"))
+        XCTAssertEqual(store.load().threshold, 0.65)
+        XCTAssertEqual(model.threshold, 0.95)
+        XCTAssertEqual(store.load().maximumCalls, 5_000)
+        XCTAssertEqual(store.calls, 1)
+        XCTAssertTrue(keychain.calls.allSatisfy { $0 == "load" })
+        XCTAssertTrue(keychain.queries.allSatisfy {
+            $0[kSecAttrAccount as String] as? String == APIKeyStore.account(for: google.endpoint)
+        })
+        model.setConsent(false)
+        XCTAssertFalse(store.load().permitsSending)
+        XCTAssertFalse(store.hasConsent(forConversionEndpoint: google.endpoint))
+        XCTAssertTrue(manual.hasConsent(for: google.endpoint))
     }
 
     func testProviderChangeResetsDecisionsEnabledAndRequiresReconsentOnReload() throws {

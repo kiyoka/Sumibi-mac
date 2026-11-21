@@ -3,8 +3,7 @@ import Observation
 import SumibiCore
 
 /// Decisions自動変換の設定モデル。
-/// 判定用のOpenAI APIキー（`endpoint:https://api.openai.com`）の入力・変更（削除は不可）と、
-/// 現在の変換接続先（OpenAIまたはGoogle）に対する自動送信同意・有効化を管理する。
+/// 現在の変換接続先と同じ判定先に対する同意・有効化を管理する。
 @Observable
 final class DecisionsSettingsModel {
     var settings = DecisionsSettings()
@@ -29,7 +28,7 @@ final class DecisionsSettingsModel {
     }
 
     var hasStoredKey: Bool { storedKeyDisplay != nil }
-    var showsOpenAIKeyEditor: Bool { !hasStoredKey || isEditingOpenAIKey }
+    var showsOpenAIKeyEditor: Bool { conversionProvider == .openAI && (!hasStoredKey || isEditingOpenAIKey) }
     var hasConversionKey: Bool { conversionKeyDisplay != nil }
     var conversionProvider: AIProvider { conversionConfiguration.provider }
     var conversionProviderName: String { conversionConfiguration.provider.displayName }
@@ -41,6 +40,11 @@ final class DecisionsSettingsModel {
     }
     var conversionKeyStatusDisplay: String { conversionKeyDisplay ?? "未設定" }
     var callCount: Int { store.calls }
+    var threshold: Double { settings.threshold(for: conversionProvider) }
+    var thresholdRange: ClosedRange<Double> { conversionProvider == .google ? 0.01...0.99 : 0...1 }
+    var decisionsName: String { conversionProvider == .google ? "Gemini Decisions API" : "OpenAI Decisions API" }
+    var decisionsEndpoint: URL { conversionProvider == .google ? GeminiDecisionsClient.endpoint : DecisionsClient.endpoint }
+    var decisionsModel: String { conversionProvider == .google ? GeminiDecisionsClient.model : settings.model }
 
     func reload() {
         statusMessage = ""; statusIsError = false
@@ -68,13 +72,10 @@ final class DecisionsSettingsModel {
             }
         }
         do {
-            storedKeyDisplay = try keys.load(for: ProviderConfiguration.defaultEndpoint, settings: manual)
+            conversionKeyDisplay = try keys.load(for: provider.endpoint, settings: manual)
                 .flatMap { APIKeyDisplay.masked(for: $0) }
             if provider.provider == .openAI {
-                conversionKeyDisplay = storedKeyDisplay
-            } else {
-                conversionKeyDisplay = try keys.load(for: provider.endpoint, settings: manual)
-                    .flatMap { APIKeyDisplay.masked(for: $0) }
+                storedKeyDisplay = conversionKeyDisplay
             }
             if resetForProviderChange {
                 report("変換の接続先が変更されたため、自動変換をオフにしました。内容を確認して再度同意してください。", error: false)
@@ -85,6 +86,7 @@ final class DecisionsSettingsModel {
     }
 
     func beginOpenAIKeyEditing() {
+        guard conversionProvider == .openAI else { return }
         openAIKeyInput = ""
         isEditingOpenAIKey = true
     }
@@ -96,7 +98,7 @@ final class DecisionsSettingsModel {
 
     func saveOpenAIKey() {
         let provider = manual.loadProviderConfiguration()
-        guard DecisionsCoordinator.isSupportedConversionProvider(provider) else {
+        guard provider.provider == .openAI, DecisionsCoordinator.isSupportedConversionProvider(provider) else {
             report(DecisionsError.unsupportedProvider.message, error: true); return
         }
         let trimmed = openAIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -107,7 +109,7 @@ final class DecisionsSettingsModel {
             report("APIキーに空白や改行が含まれています。", error: true); return
         }
         do {
-            try keys.save(trimmed, for: ProviderConfiguration.defaultEndpoint)
+            try keys.save(trimmed, for: provider.endpoint)
             let masked = APIKeyDisplay.masked(for: trimmed)
             storedKeyDisplay = masked
             if provider.provider == .openAI {
@@ -134,15 +136,9 @@ final class DecisionsSettingsModel {
                   provider.problems().isEmpty else {
                 report(missingPrerequisiteMessage(for: provider.provider), error: true); return
             }
-            guard let openAIKey = try? keys.load(for: ProviderConfiguration.defaultEndpoint, settings: manual),
-                  APIKeyDisplay.isAcceptable(openAIKey) else {
+            guard let key = try? keys.load(for: provider.endpoint, settings: manual),
+                  APIKeyDisplay.isAcceptable(key) else {
                 report(missingPrerequisiteMessage(for: provider.provider), error: true); return
-            }
-            if provider.provider != .openAI {
-                guard let conversionKey = try? keys.load(for: provider.endpoint, settings: manual),
-                      APIKeyDisplay.isAcceptable(conversionKey) else {
-                    report(missingPrerequisiteMessage(for: provider.provider), error: true); return
-                }
             }
         }
         persist(conversionEndpoint: saved.consent ? provider.endpoint : nil) { $0.enabled = enabled }
@@ -155,7 +151,9 @@ final class DecisionsSettingsModel {
                 report(DecisionsError.unsupportedProvider.message, error: true); return
             }
         }
-        persist(conversionEndpoint: consent ? provider.endpoint : nil) {
+        // Never rebind a stale sheet's consent to a different provider.
+        guard provider == conversionConfiguration else { reload(); return }
+        persist(conversionEndpoint: consent ? provider.endpoint : nil, grantingConsent: consent) {
             $0.consent = consent
             if !consent { $0.enabled = false }
         }
@@ -166,7 +164,7 @@ final class DecisionsSettingsModel {
         case .openAI:
             "OpenAIキーと親画面での変換への送信同意を設定し、この画面でも自動送信に同意してください。"
         case .google:
-            "親画面でのGoogle変換設定（APIキーと送信同意）、この画面でのOpenAI用APIキー、および自動送信への同意が必要です。"
+            "親画面でGoogleキーと変換への送信同意を設定し、この画面でもGoogleへの自動送信に同意してください。"
         case .other:
             DecisionsError.unsupportedProvider.message
         }
@@ -181,17 +179,24 @@ final class DecisionsSettingsModel {
     }
 
     func setThreshold(_ value: Double) {
-        guard value.isFinite, (0...1).contains(value) else {
+        guard value.isFinite, thresholdRange.contains(value) else {
             report("判定閾値が正しくありません。", error: true); return
         }
-        guard value != saved.threshold else { return }
-        persist(conversionEndpoint: saved.consent ? conversionConfiguration.endpoint : nil) { $0.threshold = value }
+        guard value != threshold else { return }
+        persist(conversionEndpoint: saved.consent ? conversionConfiguration.endpoint : nil) {
+            if conversionProvider == .google { $0.geminiThreshold = value }
+            else { $0.threshold = value }
+        }
     }
 
-    private func persist(conversionEndpoint: String? = nil, _ edit: (inout DecisionsSettings) -> Void) {
+    private func persist(conversionEndpoint: String? = nil, grantingConsent: Bool = false,
+                         _ edit: (inout DecisionsSettings) -> Void) {
+        guard store.load() == saved, manual.loadProviderConfiguration() == conversionConfiguration else {
+            reload(); return
+        }
         var next = saved; edit(&next)
         do {
-            try store.save(next, conversionEndpoint: conversionEndpoint)
+            try store.save(next, conversionEndpoint: conversionEndpoint, grantingConsent: grantingConsent)
             saved = next; settings = next; onChange()
             report(next.enabled ? "全アプリを対象にDecisions自動変換を有効にしました。" : "Decisions設定を保存しました。", error: false)
         } catch { report("Decisions設定を保存できませんでした。", error: true) }

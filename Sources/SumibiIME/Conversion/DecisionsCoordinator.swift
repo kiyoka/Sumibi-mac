@@ -6,20 +6,24 @@ struct AmbientWork {
     let convert: () async -> Result<ConversionResult, ConversionError>
     let remainsAuthorized: () -> Bool
     var scoreBatch: (([DecisionsObservation]) async throws -> [DecisionsAnswer])? = nil
+    var threshold: Double? = nil
 }
 
-/// Preparing work never sends. Both providers' consent/keys are checked before Decisions sends.
+/// Preparing work never sends. Both operations are pinned to the selected provider.
 struct DecisionsCoordinator {
     let store: DecisionsSettingsStore
     let manualSettings: SettingsStore
     let keys: APIKeyStore
     let conversion: ConversionCoordinator
-    let makeDecisions: (String, DecisionsSettings) -> any DecisionsService
+    let makeDecisions: (AIProvider, String, DecisionsSettings) -> any DecisionsService
 
     init(store: DecisionsSettingsStore = DecisionsSettingsStore(), manualSettings: SettingsStore = SettingsStore(),
          keys: APIKeyStore = APIKeyStore(),
          conversion: ConversionCoordinator = ConversionCoordinator(),
-         makeDecisions: @escaping (String, DecisionsSettings) -> any DecisionsService = { DecisionsClient(key: $0, settings: $1) }) {
+         makeDecisions: @escaping (AIProvider, String, DecisionsSettings) -> any DecisionsService = { provider, key, settings in
+             if provider == .google { return GeminiDecisionsClient(key: key, settings: settings) }
+             return DecisionsClient(key: key, settings: settings)
+         }) {
         self.store = store
         self.manualSettings = manualSettings
         self.keys = keys
@@ -40,22 +44,35 @@ struct DecisionsCoordinator {
         let dictionary = manualSettings.loadUserDictionary()
         let request = AmbientText.request(source: observation.text, dictionary: dictionary)
         try ConversionLimit.check(request)
-        _ = try conversion.service()
-        guard let key = try? keys.load(for: ProviderConfiguration.defaultEndpoint, settings: manualSettings), !key.isEmpty else {
+        let service = try conversion.service(for: provider, allowsRedirects: false)
+        guard let key = try? keys.load(for: provider.endpoint, settings: manualSettings),
+              APIKeyDisplay.isAcceptable(key) else {
             throw DecisionsError.missingKey
         }
-        let decisions = makeDecisions(key, settings)
+        let decisions = makeDecisions(provider.provider, key, settings)
         let revision = store.revision
+        let authorized = {
+            store.load() == settings && store.revision == revision
+                && store.hasConsent(forConversionEndpoint: provider.endpoint)
+                && manualSettings.loadProviderConfiguration() == provider
+                && manualSettings.loadUserDictionary() == dictionary
+                && manualSettings.hasConsent(for: provider.endpoint)
+        }
         return AmbientWork(
-            score: { try await decisions.score($0) },
-            convert: { await conversion.convert(request) },
-            remainsAuthorized: {
-                store.revision == revision && store.load() == settings
-                    && store.hasConsent(forConversionEndpoint: provider.endpoint)
-                    && manualSettings.loadProviderConfiguration() == provider
-                    && manualSettings.loadUserDictionary() == dictionary
-                    && manualSettings.hasConsent(for: provider.endpoint)
-            }, scoreBatch: { try await decisions.scores($0) })
+            score: { observation in
+                guard await MainActor.run(body: { authorized() }) else { throw CancellationError() }
+                return try await decisions.score(observation)
+            },
+            convert: {
+                guard await MainActor.run(body: { authorized() }), !Task.isCancelled else { return .failure(.consentMissing) }
+                return await conversion.convert(request, using: service, configuration: provider)
+            },
+            remainsAuthorized: authorized,
+            scoreBatch: { observations in
+                guard await MainActor.run(body: { authorized() }) else { throw CancellationError() }
+                return try await decisions.scores(observations)
+            },
+            threshold: settings.threshold(for: provider.provider))
     }
 
     static func isSupportedConversionProvider(_ configuration: ProviderConfiguration) -> Bool {

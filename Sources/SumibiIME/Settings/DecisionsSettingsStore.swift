@@ -5,6 +5,7 @@ import SumibiCore
 /// Short-lived IMK sessions, app/source switches and process restarts cannot reset it.
 struct DecisionsSettingsStore {
     private let defaults: UserDefaults
+    private static let geminiConsentKey = "geminiDecisionsConsentEndpoint"
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
 
     func load() -> DecisionsSettings {
@@ -25,25 +26,43 @@ struct DecisionsSettingsStore {
             return fresh
         }
         guard let data = defaults.data(forKey: "decisionsSettings"),
-              let settings = try? JSONDecoder().decode(DecisionsSettings.self, from: data),
+              var settings = try? JSONDecoder().decode(DecisionsSettings.self, from: data),
               settings.isValid else { return DecisionsSettings() }
+        // #71 recorded consent to OpenAI scoring against the Google conversion URL.
+        // It is not consent to send the same text to Gemini Decisions.
+        if let endpoint = defaults.string(forKey: "decisionsConsentConversionEndpoint"),
+           DecisionsCoordinator.isOfficialGoogle(endpoint) {
+            settings.enabled = false
+            settings.consent = false
+            try? save(settings)
+        }
         return settings
     }
 
-    func save(_ settings: DecisionsSettings, conversionEndpoint: String? = nil) throws {
+    func save(_ settings: DecisionsSettings, conversionEndpoint: String? = nil, grantingConsent: Bool = false) throws {
         guard settings.isValid else { throw DecisionsError.invalidSettings }
-        defaults.set(try JSONEncoder().encode(settings), forKey: "decisionsSettings")
+        let encoded = try JSONEncoder().encode(settings)
         if settings.consent {
             let explicit = conversionEndpoint?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let recorded = defaults.string(forKey: "decisionsConsentConversionEndpoint")
+            let gemini = defaults.string(forKey: Self.geminiConsentKey)
+            let recorded = defaults.string(forKey: "decisionsConsentConversionEndpoint") ?? gemini
             let fallback = SettingsStore(defaults: defaults, prototypeDefaults: { nil }).loadProviderConfiguration().endpoint
             let target = (explicit?.isEmpty == false ? explicit : nil) ?? recorded ?? fallback
-            if !target.isEmpty {
+            if DecisionsCoordinator.isOfficialGoogle(target) {
+                guard grantingConsent || gemini == target else { throw DecisionsError.invalidSettings }
+                // Older builds must not read a Gemini grant as consent to mixed routing.
+                defaults.removeObject(forKey: "decisionsConsentConversionEndpoint")
+                defaults.set(target, forKey: Self.geminiConsentKey)
+            } else {
+                guard DecisionsCoordinator.isOfficialOpenAI(target) else { throw DecisionsError.invalidSettings }
+                defaults.removeObject(forKey: Self.geminiConsentKey)
                 defaults.set(target, forKey: "decisionsConsentConversionEndpoint")
             }
         } else {
             defaults.removeObject(forKey: "decisionsConsentConversionEndpoint")
+            defaults.removeObject(forKey: Self.geminiConsentKey)
         }
+        defaults.set(encoded, forKey: "decisionsSettings")
         touchRevision()
     }
 
@@ -52,10 +71,12 @@ struct DecisionsSettingsStore {
     func hasConsent(forConversionEndpoint endpoint: String) -> Bool {
         let normalized = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty, load().consent else { return false }
-        if let recorded = defaults.string(forKey: "decisionsConsentConversionEndpoint") {
-            return recorded == normalized
+        if DecisionsCoordinator.isOfficialGoogle(normalized) {
+            return defaults.string(forKey: Self.geminiConsentKey) == normalized
         }
-        return DecisionsCoordinator.isOfficialOpenAI(normalized)
+        guard DecisionsCoordinator.isOfficialOpenAI(normalized),
+              defaults.object(forKey: Self.geminiConsentKey) == nil else { return false }
+        return defaults.string(forKey: "decisionsConsentConversionEndpoint").map { $0 == normalized } ?? true
     }
 
     /// 変換接続先が変更されたときに、自動変換をオフにし同意を取り直す状態へ戻す。
@@ -66,10 +87,8 @@ struct DecisionsSettingsStore {
         current.enabled = false
         current.consent = false
         defaults.removeObject(forKey: "decisionsConsentConversionEndpoint")
-        if hadActiveState, let encoded = try? JSONEncoder().encode(current) {
-            defaults.set(encoded, forKey: "decisionsSettings")
-            touchRevision()
-        }
+        defaults.removeObject(forKey: Self.geminiConsentKey)
+        if hadActiveState { try? save(current) }
     }
 
     var revision: Int { defaults.integer(forKey: "decisionsSettingsRevision") }

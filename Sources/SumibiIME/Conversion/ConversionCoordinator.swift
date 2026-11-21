@@ -38,6 +38,10 @@ struct ConversionCoordinator {
     }
 
     func service() throws -> any ConversionService {
+        try service(for: settings.loadProviderConfiguration())
+    }
+
+    func service(for configuration: ProviderConfiguration, allowsRedirects: Bool = true) throws -> any ConversionService {
         #if SUMIBI_DEVELOPMENT
         switch DevelopmentOptions.responseMode(readResponseMode()) {
         case "success": return MockConversionService(delay: 0.6, succeeds: true)
@@ -48,7 +52,6 @@ struct ConversionCoordinator {
         }
         #endif
 
-        let configuration = settings.loadProviderConfiguration()
         guard let endpoint = URL(string: configuration.endpoint), endpoint.host() != nil else {
             throw ConversionError.invalidEndpoint
         }
@@ -62,7 +65,8 @@ struct ConversionCoordinator {
             OpenAICompatibleConfiguration(
                 endpoint: endpoint,
                 model: configuration.model,
-                apiKey: apiKey
+                apiKey: apiKey,
+                allowsRedirects: allowsRedirects
             )
         )
     }
@@ -71,7 +75,20 @@ struct ConversionCoordinator {
         do {
             try ConversionLimit.check(request)
             let configuration = settings.loadProviderConfiguration()
-            let result = try await service().convert(request)
+            return await convert(request, using: try service(for: configuration), configuration: configuration)
+        } catch let error as ConversionError {
+            return .failure(error)
+        } catch {
+            return .failure(.network(error.localizedDescription))
+        }
+    }
+
+    /// The automatic flow pins the conversion service to the same provider as its score.
+    func convert(_ request: ConversionRequest, using service: any ConversionService,
+                 configuration: ProviderConfiguration) async -> Result<ConversionResult, ConversionError> {
+        do {
+            try ConversionLimit.check(request)
+            let result = try await service.convert(request)
             if let usage = result.usage {
                 let recordedModel: String
                 if let returned = result.model?.trimmingCharacters(in: .whitespacesAndNewlines), !returned.isEmpty {

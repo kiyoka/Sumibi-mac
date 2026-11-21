@@ -127,12 +127,12 @@ struct APISettingsView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 } else if model.savedProvider == .google {
-                    Text("現在の変換接続先はGoogle（Gemini API）です。判定はOpenAI Decisionsで行われるため、Decisions設定画面でOpenAI用APIキーと自動送信への同意を設定してください。")
+                    Text("Googleでは、変換と同じGoogle用キーでGemini Decisionsによる判定を行います。自動送信への同意はDecisions設定画面で設定してください。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
             } footer: {
-                Text("OpenAI Decisionsで日本語らしさを判定し、現在の変換接続先（OpenAIまたはGoogle）で自動変換する機能です。変換接続先を変更した場合は、自動変換がオフになり再同意が必要です（「その他」では使えません）。")
+                Text("現在の変換先（OpenAIまたはGoogle）と同じサービスで日本語らしさを判定します。接続先を変更すると自動変換はオフになり再同意が必要です（「その他」は手動変換のみ）。")
                     .font(.footnote).foregroundStyle(.secondary)
             }
 
@@ -405,6 +405,7 @@ final class APISettingsModel {
             report("AIへのデータ送信に同意しました。", isError: false)
         } else {
             settings.revokeConsent()
+            decisions.revokeConsentAndDisable()
             hasConsent = false
             onConfigurationSaved()
             report("AIへのデータ送信の同意を取り消しました。", isError: false)

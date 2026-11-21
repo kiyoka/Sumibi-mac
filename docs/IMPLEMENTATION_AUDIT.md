@@ -24,7 +24,7 @@
 | 手動変換の待機入力 | 文字・制御キーの順序付き待ち行列。対象変更では文字を救済 | 遅延したEnter等は記録のみで実際には送信しない。自動変換とは別 |
 | 追加候補 | 最大12候補を要求し、現在結果を先頭に保持。選択時だけ対象を置換 | [Conversion](../Sources/SumibiCore/Conversion.swift)、[コントローラー](../Sources/SumibiIME/SumibiInputController.swift) |
 | 辞書候補 | 中黒→Mozc記号→Sudachiで合計最大10件。記号は元入力全体、SudachiはLLMの全ひらがな単語から検索 | PR #61でmain統合済み。[補完処理](../Sources/SumibiCore/SupplementalCandidateDictionary.swift)。[記号仕様](SYMBOL_CANDIDATES.md) |
-| Decisions | 既定オフ、独立同意、公式接続先（`OpenAI`または`Google`）・OpenAI判定キー、閾値0.5、200ms固定窓、32状態、待機256件、10秒、通信上限10,000回 | [詳細](DECISIONS_CONVERSION.md)。#71で`Google`変換接続先選択時にもOpenAI Decisions判定＋Google変換の併用、Decisions画面でのOpenAIキー入力・変更（削除不可）、接続先変更時の自動オフ・再同意に対応 |
+| Decisions | 既定オフ、独立同意、200ms固定窓、32状態、待機256件、10秒、通信上限10,000回 | main（#71）はGoogle変換時もOpenAI判定。#76作業版では判定と変換を同一プロバイダーに固定し、旧混在同意を無効化。閾値は別保存、回数上限は共通。[詳細](DECISIONS_CONVERSION.md) |
 | 自動変換中の入力 | 入力を即時処理し、古い世代の判定・変換結果は非適用 | 手動待機キーの待ち行列を流用しない。[AmbientConversionLifecycle](../Sources/SumibiIME/Conversion/AmbientConversionLifecycle.swift) |
 | 位置・内容照合 | UTF-16範囲、選択、原文、要求ID、入力先・入力活動・認可を確認。未照合なら置換しない | [TextReplacementTracker](../Sources/SumibiIME/TextReplacementTracker.swift)、[AmbientInputSnapshot](../Sources/SumibiIME/Conversion/AmbientInputSnapshot.swift) |
 | 読取待機 | 自動変換の確定原文を最大0.5秒読取確認、置換後の結果も読取だけ再確認 | API再送・全文探索・再書込ではない。恒久的な読取制約は解消しない |

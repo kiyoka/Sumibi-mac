@@ -275,9 +275,10 @@ final class AmbientConversionLifecycle {
                         return false
                     }
                     self.lastError = nil
-                    self.feedback.recordDecisionsDecision(score: score, threshold: item.settings.threshold)
+                    let threshold = work.threshold ?? item.settings.threshold
+                    self.feedback.recordDecisionsDecision(score: score, threshold: threshold)
                     DiagnosticLog.record(.decisionsJudged)
-                    guard score >= item.settings.threshold else { return false }
+                    guard score >= threshold else { return false }
                     self.phase = .converting
                     item.target.onAccepted()
                     return true
