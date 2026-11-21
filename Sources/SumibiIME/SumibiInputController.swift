@@ -585,18 +585,7 @@ final class SumibiInputController: IMKInputController {
             switch reason {
             case .markedUnavailable: code = 1
             case .markedLengthMismatch: code = 2
-            case .selectionMismatch:
-                code = 3
-                let length = source.utf16.count
-                if DiagnosticLog.isDetailedEnabled, let ranges = rawRanges,
-                   ranges.selection == NSRange(location: length + 1, length: 0) {
-                    let probe = NSRange(location: 1, length: length)
-                    let text = IMKInputClient(input).attributedSubstring(from: probe)?.string
-                    // Requested length, returned length (-1 = unavailable), exact source match.
-                    DiagnosticLog.record(.slidesOffsetOneSourceRead, counters: [
-                        length, text?.utf16.count ?? -1, text == source ? 1 : 0
-                    ])
-                }
+            case .selectionMismatch: code = 3
             case .sourceUnavailable: code = 4
             case .sourceMismatch: code = 5
             default: code = 0

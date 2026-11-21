@@ -99,12 +99,22 @@ struct AmbientInputSnapshot: Equatable {
         let looksLikeRelativeEnd = selection.length == 0 && selection.location == marked.length
         let relativeEnd = looksLikeRelativeEnd && selection.location < marked.location
         let needsExactRead = !endCaret && !wholeComposition && !relativeEnd
-        guard !needsExactRead || (allowVerifiedRelativeComposition && looksLikeRelativeEnd) else {
+        let offsetOneEnd = allowVerifiedRelativeComposition && needsExactRead
+            && selection.length == 0 && selection.location != NSNotFound
+            && selection.location > 0 && selection.location - 1 == marked.length
+        guard !needsExactRead || offsetOneEnd || (allowVerifiedRelativeComposition && looksLikeRelativeEnd) else {
             onSelectionMismatch?(marked, selection)
             return .failure(.selectionMismatch)
         }
-        var sourceReadRange = marked
-        var actual = input.attributedSubstring(from: marked)?.string
+        // Slides may expose a one-unit prefix in its temporary input buffer.
+        // Preserve the reported coordinates and re-read the verified range before commit.
+        var sourceReadRange = offsetOneEnd ? NSRange(location: 1, length: marked.length) : marked
+        var actual = input.attributedSubstring(from: sourceReadRange)?.string
+        if offsetOneEnd {
+            DiagnosticLog.record(.slidesOffsetOneSourceRead, counters: [
+                marked.length, actual?.utf16.count ?? -1, actual == source ? 1 : 0
+            ])
+        }
         // Chrome can report a marked range in document coordinates and expose
         // the active composition in a separate, zero-based input buffer.
         // This opt-in is for committing the existing composition as a unit.

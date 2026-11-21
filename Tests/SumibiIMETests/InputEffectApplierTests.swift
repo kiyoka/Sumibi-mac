@@ -94,6 +94,33 @@ final class InputEffectApplierTests: XCTestCase {
             allowVerifiedRelativeComposition: true).get())
     }
 
+    func testSlidesOffsetOneRequiresSameCaretAndExactSourceOnBothReads() throws {
+        let runtime = isolatedRuntime()
+        let input = RecordingInputClient()
+        let source = "ohayou"
+        _ = applier(runtime).apply(runtime.state.receive(.text(source)), to: input)
+        input.text = "!" + source
+        input.selection = NSRange(location: 7, length: 0)
+        for start in [0, 12, 262] {
+            input.reportedMarkedOffset = start
+            XCTAssertNil(AmbientInputSnapshot(source: source, input: input, allowUnreadableComposition: true))
+            let snapshot = try AmbientInputSnapshot.capture(source: source, input: input,
+                allowVerifiedRelativeComposition: true).get()
+            XCTAssertTrue(snapshot.matches(input))
+            input.selection.location -= 1
+            XCTAssertFalse(snapshot.matches(input))
+            input.selection.location += 1
+            input.text = "!abcdef"
+            XCTAssertFalse(snapshot.matches(input))
+            XCTAssertThrowsError(try AmbientInputSnapshot.capture(source: source, input: input,
+                allowVerifiedRelativeComposition: true).get())
+            input.text = "!" + source
+        }
+        input.canRead = false
+        XCTAssertThrowsError(try AmbientInputSnapshot.capture(source: source, input: input,
+            allowUnreadableComposition: true, allowVerifiedRelativeComposition: true).get())
+    }
+
     func testSlidesDirectConversionRecognizesOnlyGoogleSlidesEditPages() throws {
         for value in ["https://docs.google.com/presentation/d/example/edit#slide=id.p"] {
             XCTAssertTrue(ChromeSlidesEditingTarget.isSlidesEditPage(try XCTUnwrap(URL(string: value))))
