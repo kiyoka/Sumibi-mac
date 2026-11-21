@@ -35,6 +35,59 @@ final class InputEffectApplierTests: XCTestCase {
         XCTAssertEqual(input.text, "abc")
     }
 
+    func testDirectConversionCanPreserveOrCommitCurrentComposition() throws {
+        let runtime = isolatedRuntime()
+        let input = RecordingInputClient(text: "prefix ")
+        var started = 0
+        var applier = applier(runtime) { _, _ in started += 1 }
+        _ = applier.apply(runtime.state.receive(.text("ohayou")), to: input)
+        applier.retainsComposition = { _, _ in false }
+        _ = applier.apply(runtime.state.receive(.convert), to: input)
+        XCTAssertEqual(started, 0)
+        XCTAssertNil(runtime.state.pending)
+        XCTAssertEqual(input.text, "prefix ohayou")
+        XCTAssertTrue(input.insertedValues.isEmpty)
+
+        applier.retainsComposition = { _, _ in true }
+        _ = applier.apply(runtime.state.receive(.convert), to: input)
+        let request = try XCTUnwrap(runtime.state.pending)
+        XCTAssertEqual(started, 1)
+        XCTAssertTrue(input.insertedValues.isEmpty)
+        _ = applier.apply(runtime.state.completeFirst(id: request.id, result: "おはよう"), to: input)
+        XCTAssertEqual(input.insertedValues, ["おはよう"])
+        XCTAssertEqual(input.text, "prefix おはよう")
+    }
+
+    func testSlidesDirectSnapshotRechecksRelativeBufferWithoutChangingAmbientRules() throws {
+        let runtime = isolatedRuntime()
+        let input = RecordingInputClient()
+        _ = applier(runtime).apply(runtime.state.receive(.text("ohayou")), to: input)
+        input.reportedMarkedOffset = 4
+        input.reportsRelativeMarkedCaret = true
+        XCTAssertNil(AmbientInputSnapshot(source: "ohayou", input: input, allowUnreadableComposition: true))
+        let snapshot = try AmbientInputSnapshot.capture(source: "ohayou", input: input,
+            allowVerifiedRelativeComposition: true).get()
+        XCTAssertEqual(snapshot.marked, NSRange(location: 4, length: 6))
+        XCTAssertTrue(snapshot.matches(input))
+        input.text = "arigat"
+        XCTAssertFalse(snapshot.matches(input))
+        input.text = "ohayou"
+        input.selection = NSRange(location: 5, length: 0)
+        XCTAssertFalse(snapshot.matches(input))
+    }
+
+    func testSlidesDirectConversionRecognizesOnlyGoogleSlidesEditPages() throws {
+        for value in ["https://docs.google.com/presentation/d/example/edit#slide=id.p"] {
+            XCTAssertTrue(ChromeSlidesEditingTarget.isSlidesEditPage(try XCTUnwrap(URL(string: value))))
+        }
+        for value in ["https://x.com/compose/post", "https://docs.google.com/document/d/example/edit",
+                      "https://docs.google.com/spreadsheets/d/example/edit",
+                      "https://docs.google.com/presentation/d/example/present",
+                      "https://docs.google.com.example.org/presentation/d/example/edit"] {
+            XCTAssertFalse(ChromeSlidesEditingTarget.isSlidesEditPage(try XCTUnwrap(URL(string: value))), value)
+        }
+    }
+
     func testReplacementUsesWrittenRangeEvenWhenClientReturnsStaleCaret() {
         let runtime = isolatedRuntime()
         let input = RecordingInputClient(text: "abc")

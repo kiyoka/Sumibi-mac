@@ -46,6 +46,9 @@ enum DiagnosticEvent: String, CaseIterable {
     case decisionsStarted, decisionsJudged, decisionsDiscarded, decisionsApplied, decisionsFailed
     case committedSourceWaiting, committedSourceRetried, committedSourceConfirmed
     case sourceCommitted, commitAlreadyPresent, replacementWritten
+    case deferredChromeCommitStarted, deferredChromeCommitUnavailable
+    case deferredChromeCommitSnapshotRejected
+    case deferredChromeCommitCancelled, deferredChromeCommitSubmitted
 
     var isFailure: Bool {
         switch self {

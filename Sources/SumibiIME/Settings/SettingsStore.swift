@@ -5,6 +5,8 @@ import SumibiCore
 ///
 /// APIキーはここでは扱わない。`APIKeyStore`がKeychainへ保存する。
 struct SettingsStore {
+    static let slidesDirectConversionKey = "SlidesDirectConversionEnabled"
+
     private enum Key {
         static let providerConfiguration = "providerConfiguration"
         static let providerConfigurations = "providerConfigurations"
@@ -30,6 +32,8 @@ struct SettingsStore {
 
     /// 試作版(識別子`dev.kiyoka.inputmethod.SumibiPrototypeProbe1`)の設定の保存先。
     static let prototypeDomain = "dev.kiyoka.inputmethod.SumibiPrototypeProbe1"
+
+    var slidesDirectConversionEnabled: Bool { defaults.bool(forKey: Self.slidesDirectConversionKey) }
 
     /// 試作版で保存した送信先・モデル・同意を、製品版の識別子の保存先へ一度だけ写す。
     ///
