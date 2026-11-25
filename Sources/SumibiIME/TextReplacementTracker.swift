@@ -32,11 +32,15 @@ struct ReplacementAnchor {
     var text: String
     /// 入力先の文書上での長さ(UTF-16)。ターミナルで折り返して表示された原文は、改行と字下げの分だけ`text`より長い。
     var span: Int
+    /// 選択範囲からの変換（Ctrl+J）かどうか。Chromium/Electronでは長文選択変換時にカーソルが末尾へ折り畳まれ、
+    /// カーソル前100文字より前の読み取りが`nil`になるため、安全検証で末尾ウィンドウを検査する。
+    var isSelection: Bool
 
-    init(end: Int, text: String, span: Int? = nil) {
+    init(end: Int, text: String, span: Int? = nil, isSelection: Bool = false) {
         self.end = end
         self.text = text
         self.span = span ?? text.utf16.count
+        self.isSelection = isSelection
     }
 
     var range: NSRange { NSRange(location: end - span, length: span) }
@@ -98,7 +102,20 @@ final class TextReplacementTracker {
         guard selection == anchor.range || selection == NSRange(location: anchor.end, length: 0) else {
             return .selectionChanged
         }
-        guard let actual = input.attributedSubstring(from: anchor.range)?.string else { return .sourceUnavailable }
+        guard let actual = input.attributedSubstring(from: anchor.range)?.string else {
+            if anchor.isSelection, anchor.span == anchor.text.utf16.count, anchor.span > 100 {
+                let windowLength = 100
+                let windowRange = NSRange(location: anchor.end - windowLength, length: windowLength)
+                if let windowText = input.attributedSubstring(from: windowRange)?.string,
+                   windowText.utf16.count == windowLength {
+                    let expectedSuffix = (expected as NSString).substring(from: expected.utf16.count - windowLength)
+                    if windowText != expectedSuffix {
+                        return .sourceMismatch
+                    }
+                }
+            }
+            return .sourceUnavailable
+        }
         guard actual.utf16.count == anchor.span else {
             return .lengthMismatch(expected: anchor.span, actual: actual.utf16.count)
         }
@@ -128,7 +145,7 @@ final class TextReplacementTracker {
         guard selection.length == 0, selection.location == anchor.end + length,
               input.attributedSubstring(from: NSRange(location: anchor.end, length: length))?.string == anchor.text else { return }
         DiagnosticLog.record(.targetReanchored)
-        self.anchor = ReplacementAnchor(end: selection.location, text: anchor.text)
+        self.anchor = ReplacementAnchor(end: selection.location, text: anchor.text, isSelection: anchor.isSelection)
         pendingTarget = PendingTarget(requestID: target.requestID, selection: selection,
                                       expectedText: target.expectedText, kind: target.kind)
     }
@@ -152,7 +169,7 @@ final class TextReplacementTracker {
             return
         }
         DiagnosticLog.record(.targetReanchored)
-        self.anchor = ReplacementAnchor(end: selection.location, text: anchor.text, span: span)
+        self.anchor = ReplacementAnchor(end: selection.location, text: anchor.text, span: span, isSelection: anchor.isSelection)
         pendingTarget = PendingTarget(requestID: target.requestID, selection: selection,
                                       expectedText: target.expectedText, kind: target.kind)
     }
@@ -200,7 +217,7 @@ final class TextReplacementTracker {
         guard selection.location != NSNotFound, selection.length == 0,
               let span = wrappedSpan(of: anchor.text, endingAt: selection.location, in: input) else { return false }
         DiagnosticLog.record(.targetReanchored)
-        self.anchor = ReplacementAnchor(end: selection.location, text: anchor.text, span: span)
+        self.anchor = ReplacementAnchor(end: selection.location, text: anchor.text, span: span, isSelection: anchor.isSelection)
         return true
     }
 
@@ -217,7 +234,21 @@ final class TextReplacementTracker {
             DiagnosticLog.record(.anchorRejected)
             return false
         }
-        guard let actual = input.attributedSubstring(from: range)?.string else { return false }
+        guard let actual = input.attributedSubstring(from: range)?.string else {
+            // Chromium/Electron（AntiGravityなど）ではカーソル折り畳み時にカーソル周辺（前後約100文字）以外
+            // の読み取りがnilになる。選択範囲変換（Ctrl+J）では選択開始時に全文を読み取り・検証済みのため、
+            // 全体読み取りがnilの場合は末尾100文字ウィンドウが期待値の末尾と一致するかを安全検証する。
+            if anchor.isSelection, anchor.span == anchor.text.utf16.count, anchor.span > 100 {
+                let windowLength = 100
+                let windowRange = NSRange(location: anchor.end - windowLength, length: windowLength)
+                if let windowText = input.attributedSubstring(from: windowRange)?.string,
+                   windowText.utf16.count == windowLength {
+                    let expectedSuffix = (expected as NSString).substring(from: expected.utf16.count - windowLength)
+                    return windowText == expectedSuffix
+                }
+            }
+            return false
+        }
         if anchor.span == anchor.text.utf16.count { return actual == anchor.text }
         // 折り返して表示された原文は、記録した長さのまま、改行と字下げを除いて一致することを確かめる。
         return WrappedText.suffixLength(of: anchor.text, in: actual) == anchor.span

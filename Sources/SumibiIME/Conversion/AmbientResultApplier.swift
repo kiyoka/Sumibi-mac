@@ -134,7 +134,7 @@ struct AmbientResultApplier {
             onResultTextReport(.capture(expected: first, range: range, actual: actual,
                                        stateMatches: stateMatches, input: input))
         }
-        guard stateMatches, range != nil, actual == first else {
+        guard stateMatches, let range, Self.verifiesResult(expected: first, range: range, in: input) else {
             if replacementWritten, !recordedFailure, stateMatches, let anchor = runtime.replacement.anchor,
                anchor.text == first, anchor.span == first.utf16.count,
                let onDeferredVerification {
@@ -232,7 +232,7 @@ struct AmbientResultApplier {
         let actual = stateMatches ? range.flatMap { input.attributedSubstring(from: $0)?.string } : nil
         onResultTextReport?(.capture(expected: first, range: range, actual: actual,
             stateMatches: stateMatches, input: input))
-        if stateMatches, range != nil, actual == first { return .applied }
+        if stateMatches, let range, Self.verifiesResult(expected: first, range: range, in: input) { return .applied }
         if written, stateMatches, let range, let onDeferredVerification {
             onDeferredVerification(AmbientResultVerification(expected: first, range: range,
                 selectionAtWrite: input.selectedRange(), sourceUTF16: source.utf16.count))
@@ -254,6 +254,22 @@ struct AmbientResultApplier {
               anchor.end == selection.location, anchor.end >= anchor.span,
               input.attributedSubstring(from: anchor.range)?.string == source else { return false }
         return true
+    }
+
+    static func verifiesResult(expected: String, range: NSRange, in input: any InputClient) -> Bool {
+        if let actual = input.attributedSubstring(from: range)?.string {
+            return actual == expected
+        }
+        if range.length > 100, expected.utf16.count == range.length {
+            let windowLength = 100
+            let windowRange = NSRange(location: range.location + range.length - windowLength, length: windowLength)
+            if let windowText = input.attributedSubstring(from: windowRange)?.string,
+               windowText.utf16.count == windowLength {
+                let expectedSuffix = (expected as NSString).substring(from: expected.utf16.count - windowLength)
+                return windowText == expectedSuffix
+            }
+        }
+        return false
     }
 }
 
@@ -354,7 +370,18 @@ struct AmbientResultVerification {
             captureText(.capture(expected: expected, range: range, actual: actual,
                                  stateMatches: true, input: input))
         }
-        guard let actual else { return .unavailable }
+        guard let actual else {
+            if range.length > 100, expected.utf16.count == range.length {
+                let windowLength = 100
+                let windowRange = NSRange(location: range.location + range.length - windowLength, length: windowLength)
+                if let windowText = input.attributedSubstring(from: windowRange)?.string,
+                   windowText.utf16.count == windowLength {
+                    let expectedSuffix = (expected as NSString).substring(from: expected.utf16.count - windowLength)
+                    if windowText == expectedSuffix { return .matching }
+                }
+            }
+            return .unavailable
+        }
         if actual == expected { return .matching }
         if actual.utf16.count != expected.utf16.count { return .lengthMismatch(actual.utf16.count) }
         return .mismatch

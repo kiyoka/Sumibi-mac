@@ -115,9 +115,9 @@ struct InputEffectApplier {
                 input.insertText(source, replacementRange: range)
                 let caret = input.selectedRange()
                 if caret.location != NSNotFound, caret.length == 0 {
-                    runtime.replacement.anchor = ReplacementAnchor(end: caret.location, text: source)
+                    runtime.replacement.anchor = ReplacementAnchor(end: caret.location, text: source, isSelection: true)
                 } else {
-                    runtime.replacement.anchor = ReplacementAnchor(end: range.location + range.length, text: source)
+                    runtime.replacement.anchor = ReplacementAnchor(end: range.location + range.length, text: source, isSelection: true)
                 }
                 runtime.replacement.pendingTarget = PendingTarget(requestID: id, selection: input.selectedRange(),
                                               expectedText: source, kind: .selection)
@@ -167,7 +167,7 @@ struct InputEffectApplier {
                 ])
                 // 置換後の位置は、書き込んだ範囲から決める。Chromeは書き込み直後に
                 // 古いカーソル位置を返すことがあり、それを信じると次の置換位置がずれる。
-                runtime.replacement.anchor = ReplacementAnchor(end: range.location + new.utf16.count, text: new)
+                runtime.replacement.anchor = ReplacementAnchor(end: range.location + new.utf16.count, text: new, isSelection: anchor.isSelection)
                 onReplacementWritten?(range, new)
             case .overLimit:
                 DiagnosticLog.record(.overLimit)

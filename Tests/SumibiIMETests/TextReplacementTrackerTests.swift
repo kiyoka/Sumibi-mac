@@ -147,6 +147,35 @@ final class TextReplacementTrackerTests: XCTestCase {
         XCTAssertTrue(tracker.validatesPendingTarget(request, in: document.input))
     }
 
+    func testLongSelectionConversionValidatesTrailingWindowWhenFullReadIsClippedByClientLimit() {
+        let prefix = String(repeating: "a", count: 100)
+        let suffix = String(repeating: "b", count: 100)
+        let source = prefix + suffix
+        let (tracker, request) = pendingSelection(source: source, caret: 200)
+        let document = ReplacementDocument(source, selection: NSRange(location: 200, length: 0))
+        document.minimumReadableLocation = 100
+        document.maximumReadableLength = 100
+
+        // Full read (0, 200) is nil due to client buffer limit
+        XCTAssertNil(document.input.attributedSubstring(from: NSRange(location: 0, length: 200)))
+        // Trailing window (100, 100) matches suffix and passes verification
+        XCTAssertNil(tracker.resolvePendingTarget(request, in: document.input))
+        XCTAssertTrue(tracker.validatesAnchor(in: document.input, expected: source))
+    }
+
+    func testLongSelectionConversionRejectsMismatchedTrailingWindow() {
+        let prefix = String(repeating: "a", count: 100)
+        let suffix = String(repeating: "b", count: 100)
+        let source = prefix + suffix
+        let (tracker, request) = pendingSelection(source: source, caret: 200)
+        let modified = prefix + String(repeating: "c", count: 100)
+        let document = ReplacementDocument(modified, selection: NSRange(location: 200, length: 0))
+        document.minimumReadableLocation = 100
+        document.maximumReadableLength = 100
+
+        XCTAssertEqual(tracker.resolvePendingTarget(request, in: document.input), .sourceMismatch)
+    }
+
     private func pendingFirst(source: String, caret: Int) -> (TextReplacementTracker, PendingRequest) {
         let session = InputSession()
         _ = session.receive(.text(source))
@@ -156,6 +185,17 @@ final class TextReplacementTrackerTests: XCTestCase {
         tracker.anchor = ReplacementAnchor(end: caret, text: source)
         tracker.pendingTarget = PendingTarget(requestID: request.id, selection: NSRange(location: caret, length: 0),
                                              expectedText: source, kind: .first)
+        return (tracker, request)
+    }
+
+    private func pendingSelection(source: String, caret: Int) -> (TextReplacementTracker, PendingRequest) {
+        let session = InputSession()
+        _ = session.convertSelection(source)
+        let request = session.pending!
+        let tracker = TextReplacementTracker()
+        tracker.anchor = ReplacementAnchor(end: caret, text: source, isSelection: true)
+        tracker.pendingTarget = PendingTarget(requestID: request.id, selection: NSRange(location: caret, length: 0),
+                                             expectedText: source, kind: .selection)
         return (tracker, request)
     }
 }

@@ -1314,6 +1314,55 @@ final class InputEffectApplierTests: XCTestCase {
         XCTAssertEqual(verification.readback(input), .mismatch)
     }
 
+    func testLongSelectionConversionInClientWithWindowLimit() {
+        let runtime = isolatedRuntime()
+        let prefix = String(repeating: "a", count: 100)
+        let suffix = String(repeating: "b", count: 100)
+        let source = prefix + suffix
+        let input = RecordingInputClient(text: source)
+        input.selection = NSRange(location: 0, length: 200)
+
+        let startApplier = applier(runtime)
+        _ = startApplier.apply([.startSelection(id: 1, source: source)], to: input)
+        XCTAssertEqual(runtime.replacement.anchor?.isSelection, true)
+        XCTAssertEqual(input.selectedRange(), NSRange(location: 200, length: 0))
+
+        // Simulate Chromium window limit: caret is at 200, window is [100, 300]
+        input.minimumReadableLocation = 100
+        input.maximumReadableLength = 100
+
+        // At this point, full read (0, 200) returns nil
+        XCTAssertNil(input.attributedSubstring(from: NSRange(location: 0, length: 200)))
+        // But trailing window (100, 100) returns suffix
+        XCTAssertEqual(input.attributedSubstring(from: NSRange(location: 100, length: 100))?.string, suffix)
+
+        let converted = "変換結果の日本語テキスト"
+        var written = false
+        var testApplier = applier(runtime)
+        testApplier.onReplacementWritten = { _, _ in written = true }
+
+        XCTAssertTrue(testApplier.apply([.replacePrevious(from: source, to: converted)], to: input))
+        XCTAssertTrue(written)
+        XCTAssertEqual(input.text, converted)
+        XCTAssertEqual(input.selectedRange(), NSRange(location: converted.utf16.count, length: 0))
+    }
+
+    func testLongResultVerificationValidatesTrailingWindowWhenFullReadIsUnavailable() {
+        let prefix = String(repeating: "あ", count: 80)
+        let suffix = String(repeating: "い", count: 80)
+        let converted = prefix + suffix // 160 characters
+        let input = RecordingInputClient(text: converted)
+        input.selection = NSRange(location: 160, length: 0)
+        input.minimumReadableLocation = 60
+        input.maximumReadableLength = 100
+
+        let verification = AmbientResultVerification(expected: converted, range: NSRange(location: 0, length: 160),
+            selectionAtWrite: NSRange(location: 160, length: 0), sourceUTF16: 200)
+
+        XCTAssertNil(input.attributedSubstring(from: NSRange(location: 0, length: 160)))
+        XCTAssertEqual(verification.readback(input), .matching)
+    }
+
     private func applier(_ runtime: InputRuntime,
                          start: @escaping (Int, ConversionRequest) -> Void = { _, _ in }) -> InputEffectApplier {
         InputEffectApplier(runtime: runtime, startConversion: start, pokeClient: { _ in }, selectCandidate: { _ in })
@@ -1327,6 +1376,8 @@ private final class RecordingInputClient: InputClient {
     var updateCaretAfterWrite = true
     var canRead = true
     var canReadMarked = true
+    var minimumReadableLocation: Int?
+    var maximumReadableLength: Int?
     var committedReadOverride: String?
     var markedReadOverride: String?
     var emptyOutOfBoundsReads = false
@@ -1361,6 +1412,8 @@ private final class RecordingInputClient: InputClient {
         onRead?()
         let value = text as NSString
         guard canRead else { return nil }
+        if let minLoc = minimumReadableLocation, range.location < minLoc { return nil }
+        if let maxLen = maximumReadableLength, range.length > maxLen { return nil }
         if marked.location == NSNotFound, range.location == reportedMarkedOffset {
             return staleRangeRead.map { NSAttributedString(string: $0) }
         }
